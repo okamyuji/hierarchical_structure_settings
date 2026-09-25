@@ -1,0 +1,22 @@
+[package]
+name = "hierarchical_structure_settings"
+version = "0.1.0"
+edition = "2021"
+authors = ["Your Name <your.email@example.com>"]
+description = "階層型設定管理システム - Hierarchical configuration management system"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/yourusername/hierarchical_structure_settings"
+keywords = ["config", "configuration", "settings", "hierarchical", "toml", "json"]
+categories = ["config"]
+
+[lib]
+name = "hierarchical_structure_settings"
+path = "src/lib.rs"
+
+[dependencies]
+serde_json = "1.0"
+toml = "0.8"
+uuid = { version = "1.10", features = ["v4"] }
+
+[dev-dependencies]

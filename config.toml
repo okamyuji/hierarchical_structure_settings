@@ -1,0 +1,211 @@
+# アプリケーション設定ファイル (TOML形式)
+# 階層構造設定システム用サンプル設定
+
+[app]
+name = "HierarchicalConfigApp"
+version = "1.0.0"
+description = "Rust製階層型設定管理システムのデモアプリケーション"
+
+# データベース設定
+[database]
+host = "localhost"
+port = 5432
+username = "admin"
+password = "secret123"
+database_name = "config_app_db"
+max_connections = 100
+timeout_seconds = 30
+ssl_enabled = true
+backup_enabled = true
+
+# データベース接続プール設定
+[database.pool]
+min_connections = 5
+max_connections = 50
+idle_timeout = 600
+connection_lifetime = 1800
+
+# レプリケーション設定
+[database.replication]
+enabled = true
+master_host = "db-master.example.com"
+slave_hosts = ["db-slave1.example.com", "db-slave2.example.com", "db-slave3.example.com"]
+sync_mode = "async"
+
+# デバッグ設定
+[debug]
+enabled = true
+log_level = "DEBUG"
+verbose_logging = false
+trace_sql_queries = true
+performance_metrics = true
+
+# デバッグ出力設定
+[debug.output]
+console = true
+file = true
+syslog = false
+remote_logging = false
+
+# ログファイル設定
+[debug.logging]
+directory = "/var/log/configapp"
+max_file_size_mb = 100
+max_files = 10
+rotation_enabled = true
+compression = true
+
+# サーバー設定
+[server]
+host = "0.0.0.0"
+port = 8080
+worker_threads = 4
+max_request_size_mb = 10
+request_timeout_seconds = 60
+keep_alive = true
+
+# TLS/SSL設定
+[server.tls]
+enabled = true
+cert_file = "/etc/ssl/certs/server.crt"
+key_file = "/etc/ssl/private/server.key"
+protocols = ["TLSv1.2", "TLSv1.3"]
+
+# セキュリティ設定
+[security]
+jwt_secret = "your-super-secret-jwt-key-here"
+token_expiry_hours = 24
+rate_limiting_enabled = true
+cors_enabled = true
+allowed_origins = ["https://example.com", "https://app.example.com"]
+
+# レート制限設定
+[security.rate_limit]
+requests_per_minute = 100
+burst_size = 20
+window_minutes = 1
+block_duration_minutes = 15
+
+# キャッシュ設定
+[cache]
+enabled = true
+type = "redis"
+ttl_seconds = 3600
+max_memory_mb = 512
+
+# Redisキャッシュ設定
+[cache.redis]
+host = "localhost"
+port = 6379
+database = 0
+password = ""
+max_connections = 20
+timeout_ms = 5000
+
+# メール設定
+[email]
+smtp_host = "smtp.gmail.com"
+smtp_port = 587
+username = "noreply@example.com"
+password = "app-specific-password"
+use_tls = true
+from_address = "noreply@example.com"
+from_name = "Config App"
+
+# 通知設定
+[notifications]
+enabled = true
+channels = ["email", "slack", "webhook"]
+
+# Slack通知設定
+[notifications.slack]
+webhook_url = "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
+channel = "#notifications"
+username = "ConfigApp Bot"
+
+# Webhook通知設定
+[notifications.webhook]
+url = "https://api.example.com/webhooks/notifications"
+timeout_seconds = 10
+retry_attempts = 3
+
+# ストレージ設定
+[storage]
+type = "local"
+base_directory = "/var/lib/configapp"
+max_file_size_mb = 100
+cleanup_enabled = true
+retention_days = 90
+
+# S3ストレージ設定（オプション）
+[storage.s3]
+bucket = "configapp-storage"
+region = "us-west-2"
+access_key = "YOUR_AWS_ACCESS_KEY"
+secret_key = "YOUR_AWS_SECRET_KEY"
+encryption = true
+
+# モニタリング設定
+[monitoring]
+enabled = true
+metrics_port = 9090
+health_check_enabled = true
+health_check_path = "/health"
+
+# Prometheus設定
+[monitoring.prometheus]
+enabled = true
+scrape_interval_seconds = 30
+metrics_path = "/metrics"
+
+# ヘルスチェック設定
+[monitoring.health]
+database_check = true
+cache_check = true
+storage_check = true
+timeout_seconds = 5
+
+# 機能フラグ設定
+[features]
+user_registration = true
+password_reset = true
+two_factor_auth = false
+admin_panel = true
+api_v2 = false
+experimental_features = false
+
+# API設定
+[api]
+version = "v1"
+base_path = "/api/v1"
+documentation_enabled = true
+swagger_ui_enabled = true
+rate_limiting = true
+
+# API認証設定
+[api.auth]
+required = true
+methods = ["jwt", "api_key"]
+jwt_algorithm = "HS256"
+api_key_header = "X-API-Key"
+
+# 国際化設定
+[i18n]
+default_locale = "ja_JP"
+supported_locales = ["ja_JP", "en_US", "zh_CN", "ko_KR"]
+fallback_locale = "en_US"
+auto_detect = true
+
+# バックアップ設定
+[backup]
+enabled = true
+schedule = "0 2 * * *"  # 毎日午前2時
+retention_days = 30
+compression = true
+encryption = true
+
+# バックアップ先設定
+[backup.destination]
+type = "s3"
+bucket = "configapp-backups"
+prefix = "daily/"
