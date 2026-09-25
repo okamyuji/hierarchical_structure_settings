@@ -75,10 +75,19 @@ impl ConfigNode {
     }
 }
 
-const SENSITIVE_KEYS: [&str; 4] = ["password", "secret", "access_key", "webhook_url"];
+const SENSITIVE_KEYS: [&str; 6] = [
+    "password",
+    "secret",
+    "token",
+    "api_key",
+    "access_key",
+    "webhook_url",
+];
 
-fn is_sensitive(name: &str, value: &ConfigValue) -> bool {
-    matches!(value, ConfigValue::String(_)) && SENSITIVE_KEYS.iter().any(|k| name.contains(k))
+// 環境変数は `_` を `.` に変えて読み込むので、区切りを揃えたフルパスで照合する。
+fn is_sensitive(path: &str) -> bool {
+    let path = path.to_lowercase().replace('.', "_");
+    SENSITIVE_KEYS.iter().any(|k| path.contains(k))
 }
 
 // 設定管理システムのメイン構造体
@@ -137,21 +146,24 @@ impl ConfigManager {
 
     // 設定ツリーを表示
     pub fn display_tree(&self) {
-        self.display_node(&self.root, 0);
+        self.display_node(&self.root, 0, "");
     }
 
-    fn display_node(&self, node: &ConfigNode, depth: usize) {
+    fn display_node(&self, node: &ConfigNode, depth: usize, path: &str) {
         let indent = "  ".repeat(depth);
         match &*node.value.borrow() {
-            Some(value) if is_sensitive(node.name(), value) => {
-                println!("{}{}= ***", indent, node.name())
-            }
+            Some(_) if is_sensitive(path) => println!("{}{}= ***", indent, node.name()),
             Some(value) => println!("{}{}= {:?}", indent, node.name(), value),
             None => println!("{}{}/", indent, node.name()),
         }
 
         for child in node.children.borrow().values() {
-            self.display_node(child, depth + 1);
+            let child_path = if path.is_empty() {
+                child.name().to_string()
+            } else {
+                format!("{}.{}", path, child.name())
+            };
+            self.display_node(child, depth + 1, &child_path);
         }
     }
 }
@@ -264,6 +276,24 @@ mod tests {
             .unwrap();
         assert_eq!(config.get_config("a.b"), Some(ConfigValue::Integer(2)));
         assert_eq!(config.get_config("a.b.c"), Some(ConfigValue::Integer(9)));
+    }
+
+    #[test]
+    fn is_sensitive_matches_full_path_case_insensitively() {
+        for path in [
+            "database.password",
+            "Auth.Password",
+            "storage.s3.secret.key",
+            "api.key",
+            "api.token",
+            "aws.access_key",
+            "slack.webhook_url",
+        ] {
+            assert!(is_sensitive(path), "{path}");
+        }
+        for path in ["database.host", "api.auth.methods", "server.port", ""] {
+            assert!(!is_sensitive(path), "{path}");
+        }
     }
 
     #[test]
