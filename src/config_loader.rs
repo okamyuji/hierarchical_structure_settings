@@ -37,11 +37,11 @@ impl ConfigLoader {
     ) -> Result<(), Box<dyn std::error::Error>> {
         use std::env;
 
+        // "APP" と "APP_" を同じ扱いにし、APPLE_* のような別名の変数を拾わない。
+        let prefix = format!("{}_", prefix.trim_end_matches('_'));
         for (key, value) in env::vars() {
-            if key.starts_with(prefix) {
-                let config_path = key
-                    .strip_prefix(prefix)
-                    .unwrap()
+            if let Some(rest) = key.strip_prefix(&prefix) {
+                let config_path = rest
                     .trim_start_matches('_')
                     .to_lowercase()
                     .replace('_', ".");
@@ -406,6 +406,16 @@ mod tests {
         unsafe {
             std::env::set_var("HSSTEST_DATABASE_HOST", "db.example.com");
             std::env::set_var("HSSTEST_DATABASE_PORT", "5433");
+            std::env::set_var("HSSTESTX_LEAK", "1");
+        }
+        for prefix in ["HSSTEST", "HSSTEST_"] {
+            let config = ConfigManager::new("t".to_string());
+            ConfigLoader::load_from_env(&config, prefix).unwrap();
+            assert_eq!(
+                config.get_config("database.port"),
+                Some(ConfigValue::Integer(5433))
+            );
+            assert_eq!(config.get_config("x.leak"), None, "{prefix}");
         }
         let config = ConfigManager::new("t".to_string());
         ConfigLoader::load_from_env(&config, "HSSTEST").unwrap();

@@ -11,7 +11,7 @@ description = "Rust製階層型設定管理システムのデモアプリケー�
 host = "localhost"
 port = 5432
 username = "admin"
-password = "secret123"
+password = "CHANGE_ME"
 database_name = "config_app_db"
 max_connections = 100
 timeout_seconds = 30
@@ -73,7 +73,7 @@ protocols = ["TLSv1.2", "TLSv1.3"]
 
 # セキュリティ設定
 [security]
-jwt_secret = "your-super-secret-jwt-key-here"
+jwt_secret = "CHANGE_ME"
 token_expiry_hours = 24
 rate_limiting_enabled = true
 cors_enabled = true
@@ -107,7 +107,7 @@ timeout_ms = 5000
 smtp_host = "smtp.gmail.com"
 smtp_port = 587
 username = "noreply@example.com"
-password = "app-specific-password"
+password = "CHANGE_ME"
 use_tls = true
 from_address = "noreply@example.com"
 from_name = "Config App"
@@ -119,7 +119,7 @@ channels = ["email", "slack", "webhook"]
 
 # Slack通知設定
 [notifications.slack]
-webhook_url = "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
+webhook_url = "CHANGE_ME"
 channel = "#notifications"
 username = "ConfigApp Bot"
 
@@ -141,8 +141,8 @@ retention_days = 90
 [storage.s3]
 bucket = "configapp-storage"
 region = "us-west-2"
-access_key = "YOUR_AWS_ACCESS_KEY"
-secret_key = "YOUR_AWS_SECRET_KEY"
+access_key = "CHANGE_ME"
+secret_key = "CHANGE_ME"
 encryption = true
 
 # モニタリング設定

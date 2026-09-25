@@ -75,6 +75,12 @@ impl ConfigNode {
     }
 }
 
+const SENSITIVE_KEYS: [&str; 4] = ["password", "secret", "access_key", "webhook_url"];
+
+fn is_sensitive(name: &str, value: &ConfigValue) -> bool {
+    matches!(value, ConfigValue::String(_)) && SENSITIVE_KEYS.iter().any(|k| name.contains(k))
+}
+
 // 設定管理システムのメイン構造体
 pub struct ConfigManager {
     root: Rc<ConfigNode>,
@@ -137,6 +143,9 @@ impl ConfigManager {
     fn display_node(&self, node: &ConfigNode, depth: usize) {
         let indent = "  ".repeat(depth);
         match &*node.value.borrow() {
+            Some(value) if is_sensitive(node.name(), value) => {
+                println!("{}{}= ***", indent, node.name())
+            }
             Some(value) => println!("{}{}= {:?}", indent, node.name(), value),
             None => println!("{}{}/", indent, node.name()),
         }

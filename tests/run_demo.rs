@@ -6,6 +6,7 @@ fn demo_binary_loads_config_files_and_env() {
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .env("APP_DEMOCHECK_VALUE", "77")
         .env("APPX_LEAK", "1")
+        .env("APP_DB_PASSWORD", "hunter2")
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -33,4 +34,9 @@ fn demo_binary_loads_config_files_and_env() {
         !stdout.contains("leak= "),
         "APPX_ must not be loaded:\n{stdout}"
     );
+    for secret in ["CHANGE_ME", "hunter2"] {
+        assert!(!stdout.contains(secret), "{secret} leaked:\n{stdout}");
+    }
+    assert!(stdout.contains("password= ***"), "{stdout}");
+    assert!(stdout.contains("password_reset= Boolean(true)"), "{stdout}");
 }
