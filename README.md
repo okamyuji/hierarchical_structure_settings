@@ -30,6 +30,10 @@ config.set_config("debug.enabled", ConfigValue::Boolean(true))?;
 let host = config.get_config("database.host");
 let port = config.get_config("database.port");
 
+// 表示を許可するパスの登録（登録しなかった値は *** と表示される）
+config.allow_display("database.port")?;
+config.allow_display("debug.enabled")?;
+
 // 設定ツリーの表示
 config.display_tree();
 ```
@@ -137,11 +141,11 @@ export MYAPP_DEBUG_ENABLED=true
 `display_tree`は設定ツリー全体を標準出力に表示する関数です。1つの値だけを表示したい場合は、同じ規則に従う`get_display`が使えます。どちらの関数も、`allow_display`で許可したパスの値だけを表示し、それ以外の値は`***`に置き換えます。既定では何も許可していないので、登録しなければすべての値が隠れる仕組みです。
 
 ```rust
-config.allow_display("server.port"); // このパスだけを表示する
-config.allow_display("features.*");  // features 配下のすべてを表示する
+config.allow_display("server.port")?; // このパスだけを表示する
+config.allow_display("features.*")?;  // features 配下のすべてを表示する
 ```
 
-パターンの書き方は2通りです。完全なパスを書いた場合は、そのパスにだけ一致します。末尾を`.*`にした場合は、その配下のあらゆる深さのパスに一致しますが、`features`そのものや`featuresx.a`のような別名には一致しません。
+パターンの書き方は2通りです。完全なパスを書いた場合は、そのパスにだけ一致します。末尾を`.*`にした場合は、その配下のあらゆる深さのパスに一致しますが、`features`そのものや`featuresx.a`のような別名には一致しません。ワイルドカードは後から配下に加えたキーも表示するので、秘密値が入り得る階層には使わず、完全なパスで登録するのが安全です。空のパターン、空のセグメント、末尾の`.*`以外の場所にある`*`は、`allow_display`がエラーとして返します。
 
 この方式は、秘密値かどうかを名前や値の形から推測しない設計です。表示してよい項目を開発者が明示するので、見分け方に抜け道が生じる余地がなくなります。その代わり、許可したパスに秘密値を入れれば、そのまま表示されます。パスワードや接続文字列が入り得るパスは、許可リストに加えないでください。
 

@@ -144,11 +144,25 @@ impl ConfigManager {
 
     /// 表示を許可するパスを登録する。`server.port` はそのパスだけ、`features.*` は配下のすべてに一致する。
     ///
+    /// `features.*` は `features` そのものには一致しない。ワイルドカードは、後から配下に加えたキーも表示する。
     /// 許可していないパスの値は、`display_tree` と `get_display` で `***` になる。既定では何も許可しない。
-    pub fn allow_display(&self, pattern: &str) {
-        self.display_allowlist
-            .borrow_mut()
-            .push(pattern.to_string());
+    ///
+    /// 空のパターン、空のセグメント、末尾の `.*` 以外に現れる `*` はエラーになる。同じパターンは一度だけ登録する。
+    pub fn allow_display(&self, pattern: &str) -> Result<(), String> {
+        let segments: Vec<&str> = pattern.split('.').collect();
+        // split は常に1つ以上の要素を返すので、segments は空にならない。
+        let (parents, last) = segments.split_at(segments.len() - 1);
+        let valid = segments.iter().all(|s| !s.is_empty())
+            && parents.iter().all(|s| !s.contains('*'))
+            && (!last[0].contains('*') || (last[0] == "*" && !parents.is_empty()));
+        if !valid {
+            return Err(format!("Invalid display pattern: {pattern:?}"));
+        }
+        let mut allowlist = self.display_allowlist.borrow_mut();
+        if !allowlist.iter().any(|p| p == pattern) {
+            allowlist.push(pattern.to_string());
+        }
+        Ok(())
     }
 
     fn is_display_allowed(&self, path: &str) -> bool {
@@ -326,8 +340,8 @@ mod tests {
     #[test]
     fn allow_display_matches_exact_paths_and_wildcard_subtrees() {
         let config = ConfigManager::new("app".to_string());
-        config.allow_display("server.port");
-        config.allow_display("features.*");
+        config.allow_display("server.port").unwrap();
+        config.allow_display("features.*").unwrap();
         for path in ["server.port", "features.a", "features.a.b"] {
             assert!(config.is_display_allowed(path), "{path}");
         }
@@ -342,6 +356,29 @@ mod tests {
         ] {
             assert!(!config.is_display_allowed(path), "{path}");
         }
+    }
+
+    #[test]
+    fn allow_display_rejects_malformed_patterns() {
+        let config = ConfigManager::new("app".to_string());
+        for pattern in ["", "*", ".*", "a..b", "a.", "a.*.b", "a*", "a.b*", "*.a"] {
+            assert_eq!(
+                config.allow_display(pattern),
+                Err(format!("Invalid display pattern: {pattern:?}")),
+            );
+        }
+        for pattern in ["a", "a.b", "a.*", "a.b.*"] {
+            assert_eq!(config.allow_display(pattern), Ok(()), "{pattern}");
+        }
+        assert_eq!(config.display_allowlist.borrow().len(), 4);
+    }
+
+    #[test]
+    fn allow_display_ignores_duplicate_patterns() {
+        let config = ConfigManager::new("app".to_string());
+        config.allow_display("a.b").unwrap();
+        config.allow_display("a.b").unwrap();
+        assert_eq!(config.display_allowlist.borrow().len(), 1);
     }
 
     #[test]
@@ -373,7 +410,7 @@ mod tests {
         config
             .set_config("db.port", ConfigValue::Integer(5432))
             .unwrap();
-        config.allow_display("db.port");
+        config.allow_display("db.port").unwrap();
         assert_eq!(config.get_display("db.password"), Some("***".to_string()));
         assert_eq!(config.get_display("db.port"), Some("5432".to_string()));
         assert_eq!(config.get_display("db.missing"), None);

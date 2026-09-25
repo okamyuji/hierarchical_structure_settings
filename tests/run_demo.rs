@@ -14,6 +14,8 @@ fn demo_binary_loads_config_files_and_env() {
         .env("APP_DB_PASSWORD", "31415926535")
         .env("APP_STORAGE_S3_SECRET_KEY", "AKIAREALSECRET")
         .env("APP_API_TOKEN", "tok123")
+        .env("APP_APP_SECRET", "appsec")
+        .env("APP_FEATURES_API_TOKEN", "feattok")
         .env("APP_DATABASE_HOST", "postgres://u:hostpw@db/app")
         .output()
         .unwrap();
@@ -26,7 +28,8 @@ fn demo_binary_loads_config_files_and_env() {
         "データベース: config_app_db",
         "バインドアドレス: 0.0.0.0:8080",
         "ホスト: ***",
-        "password_reset= true",
+        "password_reset= ***",
+        "database_name= config_app_db",
         "token_expiry_hours= ***",
         "\n    value= ***",
         "✓ 実行時設定の追加完了",
@@ -34,7 +37,9 @@ fn demo_binary_loads_config_files_and_env() {
         "  ログレベル: DEBUG",
         "  ✓ ユーザー登録",
         "  ✗ API v2",
-        "更新後のデバッグ設定: Boolean(false)",
+        "更新後のデバッグ設定: false",
+        "現在のデバッグ設定: true",
+        "更新後のログレベル: INFO",
         "    - https://admin.example.com",
         "    - ko_KR",
         "    - webhook",
@@ -55,6 +60,8 @@ fn demo_binary_loads_config_files_and_env() {
         "AKIAREALSECRET",
         "tok123",
         "hostpw",
+        "appsec",
+        "feattok",
     ] {
         assert!(!stdout.contains(secret), "{secret} leaked:\n{stdout}");
     }

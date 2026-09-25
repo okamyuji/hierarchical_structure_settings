@@ -7,17 +7,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 設定管理システムを初期化
     let config = ConfigManager::new("DemoApp".to_string());
-    // 表示してよい項目だけを登録する。登録しなかった値は *** で表示される。
+    // 表示してよい項目だけを完全なパスで登録する。登録しなかった値は *** で表示される。
     for pattern in [
-        "app.*",
+        "app.name",
         "server.host",
         "server.port",
-        "debug.*",
-        "features.*",
+        "debug.enabled",
+        "debug.log_level",
         "database.port",
         "database.database_name",
     ] {
-        config.allow_display(pattern);
+        config.allow_display(pattern)?;
     }
 
     // 1. 外部設定ファイルからの読み込み
@@ -182,8 +182,8 @@ fn demonstrate_config_updates(config: &ConfigManager) -> Result<(), String> {
     println!("デバッグモードを無効化...");
 
     // 現在の値を表示
-    if let Some(current_debug) = config.get_config("debug.enabled") {
-        println!("現在のデバッグ設定: {:?}", current_debug);
+    if let Some(current_debug) = config.get_display("debug.enabled") {
+        println!("現在のデバッグ設定: {}", current_debug);
     }
 
     config.update_config("debug.enabled", ConfigValue::Boolean(false))?;
@@ -192,13 +192,13 @@ fn demonstrate_config_updates(config: &ConfigManager) -> Result<(), String> {
     println!("デバッグ設定を更新しました");
 
     // 更新後の値を確認
-    if let Some(updated_debug) = config.get_config("debug.enabled") {
-        println!("更新後のデバッグ設定: {:?}", updated_debug);
+    if let Some(updated_debug) = config.get_display("debug.enabled") {
+        println!("更新後のデバッグ設定: {}", updated_debug);
     }
 
     // ログレベルも確認
-    if let Some(updated_log_level) = config.get_config("debug.log_level") {
-        println!("更新後のログレベル: {:?}", updated_log_level);
+    if let Some(updated_log_level) = config.get_display("debug.log_level") {
+        println!("更新後のログレベル: {}", updated_log_level);
     }
 
     Ok(())
