@@ -8,7 +8,7 @@ description = "階層型設定管理システム - Hierarchical configuration ma
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/okamyuji/hierarchical_structure_settings"
-keywords = ["config", "configuration", "settings", "hierarchical", "toml", "json"]
+keywords = ["config", "configuration", "settings", "toml", "json"]
 categories = ["config"]
 
 [lib]

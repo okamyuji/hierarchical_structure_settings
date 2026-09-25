@@ -52,7 +52,7 @@ ConfigLoader::load_from_toml(&config, "config.toml")?;
 ConfigLoader::load_from_env(&config, "MYAPP_")?;
 
 // 設定の検証
-let warnings = ConfigLoader::validate_config(&config)?;
+let warnings = ConfigLoader::validate_config(&config);
 if !warnings.is_empty() {
     for warning in warnings {
         eprintln!("Warning: {}", warning);
@@ -130,13 +130,17 @@ export MYAPP_DATABASE_PORT=5433
 export MYAPP_DEBUG_ENABLED=true
 ```
 
-`load_from_env`は、渡された接頭辞の末尾に`_`を補ってから変数名と照合します。`MYAPP`と`MYAPP_`のどちらを渡しても結果は同じです。`MYAPPX_HOST`のように接頭辞の直後が`_`でない変数は読み込みません。変数名の中の`_`は階層の区切りとして扱われるので、`MYAPP_DATABASE_HOST`の値は`database.host`に入ります。
+`load_from_env`は、渡された接頭辞の末尾に`_`を補ってから変数名と照合します。UTF-8として読めない変数と、`MYAPP_`や`MYAPP_A__B`のように空の階層ができる変数は読み飛ばします。`MYAPP`と`MYAPP_`のどちらを渡しても結果は同じです。`MYAPPX_HOST`のように接頭辞の直後が`_`でない変数は読み込みません。変数名の中の`_`は階層の区切りとして扱われるので、`MYAPP_DATABASE_HOST`の値は`database.host`に入ります。
 
 ## 設定値の表示と秘密値の扱い
 
 `display_tree`は設定ツリー全体を標準出力に表示する関数です。パスワードやトークンのような秘密値については、値の代わりに`***`を表示します。
 
-秘密値かどうかの判定には、設定のフルパスを小文字にし、`.`を`_`に置き換えた文字列の末尾を使います。末尾が`password`、`passwd`、`secret`、`secret_key`、`token`、`credential`、`credentials`、`private_key`、`api_key`、`apikey`、`access_key`、`webhook_url`のいずれかであれば、値の型によらず隠す対象です。`token_expiry_hours`や`password_reset`のように語が途中に現れるだけのキーは隠しません。Webhookの送信先URLはトークンを含むことが多いので、`notifications.webhook.url`も隠す対象に含めてあります。
+秘密値かどうかの判定には、設定のフルパスを小文字にし、`.`と`-`を`_`に置き換えた文字列を使います。この文字列を`_`で語に分け、`password`、`pass`、`secret`、`token`、`credential`、`key`、`apikey`、`pat`、`dsn`、`bearer`、`webhook`のいずれかと一致する語があれば隠す対象です。語の末尾の数字と複数形の`s`は取り除いてから比べるので、`password2`や`refresh_tokens`も隠れます。`dbpassword`のように区切りなしでつながった名前は、`password`などの長い語を部分一致でも探して拾います。値の型は問いません。また、`postgres://user:pw@host/db`のように資格情報を含むURLの値も、キー名にかかわらず隠します。
+
+判定は取りこぼしより隠しすぎを選ぶ方針です。ただし、最後の語が`hours`、`seconds`、`attempts`、`reset`、`header`、`file`、`path`、`enabled`のどれかであれば、期限や回数、フラグ、ファイルの場所を表すキーとみなして隠しません。そのため`token_expiry_hours`や`password_reset`はそのまま表示されます。
+
+このマスクは名前と値の形に頼る補助的な仕組みで、すべての秘密値を確実に見分けられるわけではありません。秘密値を含む設定ツリーを、本番環境のログへ出力しないでください。
 
 同梱の`config.toml`と`config.json`では、秘密値の欄に`CHANGE_ME`という仮の値を入れてあります。実際の値は環境変数で渡すか、`.gitignore`で除外される`config.production.toml`などのファイルに書いてください。
 
@@ -206,7 +210,7 @@ toml = "1.1"
 uuid = { version = "1.26", features = ["v4"] }
 ```
 
-このクレートはRust edition 2024でビルドするため、Rust 1.88以上が必要です。
+このクレートはRust edition 2024でビルドします。コードが`if let`を`&&`でつなぐlet chainsを使っているので、Rust 1.88以上が必要です。
 
 ## テスト
 

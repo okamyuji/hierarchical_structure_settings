@@ -58,10 +58,8 @@ fn load_config_files(config: &ConfigManager) -> Result<(), Box<dyn std::error::E
 
     // 環境変数からの読み込み
     println!("  環境変数から設定を読み込んでいます (APP_プレフィックス)...");
-    match ConfigLoader::load_from_env(config, "APP_") {
-        Ok(_) => println!("  ✓ 環境変数の読み込み完了"),
-        Err(e) => println!("  ⚠ 環境変数読み込みエラー: {}", e),
-    }
+    ConfigLoader::load_from_env(config, "APP_")?;
+    println!("  ✓ 環境変数の読み込み完了");
 
     Ok(())
 }
@@ -80,7 +78,7 @@ fn add_runtime_config(config: &ConfigManager) -> Result<(), String> {
         ConfigValue::Integer(
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .map_err(|e| e.to_string())?
                 .as_secs() as i64,
         ),
     )?;

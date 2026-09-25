@@ -1,56 +1,70 @@
 use crate::{ConfigManager, ConfigValue};
 use serde_json::Value;
+use std::ffi::OsString;
 use std::fs;
 use std::path::Path;
 
+/// JSON、TOML、環境変数から `ConfigManager` へ設定を読み込む。
 pub struct ConfigLoader;
 
 impl ConfigLoader {
-    /// JSONファイルから設定を読み込み、ConfigManagerに設定する
+    /// JSON ファイルを読み込む。エラーにはファイルのパスを含める。
     pub fn load_from_json<P: AsRef<Path>>(
         config_manager: &ConfigManager,
         path: P,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let content = fs::read_to_string(path)?;
-        let json_value: Value = serde_json::from_str(&content)?;
+        let path = path.as_ref();
+        let content = Self::read_file(path)?;
+        let json_value: Value =
+            serde_json::from_str(&content).map_err(|e| format!("{}: {e}", path.display()))?;
 
         Self::load_json_value(config_manager, &json_value, String::new())?;
         Ok(())
     }
 
-    /// TOMLファイルから設定を読み込み、ConfigManagerに設定する
+    /// TOML ファイルを読み込む。エラーにはファイルのパスを含める。
     pub fn load_from_toml<P: AsRef<Path>>(
         config_manager: &ConfigManager,
         path: P,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let content = fs::read_to_string(path)?;
-        let toml_value: toml::Value = toml::from_str(&content)?;
+        let path = path.as_ref();
+        let content = Self::read_file(path)?;
+        let toml_value: toml::Value =
+            toml::from_str(&content).map_err(|e| format!("{}: {e}", path.display()))?;
 
         Self::load_toml_value(config_manager, &toml_value, String::new())?;
         Ok(())
     }
 
-    /// 環境変数から設定を読み込み（プレフィックス付き）
+    /// `<prefix>_` で始まる環境変数を読み込む。`APP_DATABASE_HOST` は `database.host` に入る。
+    ///
+    /// UTF-8 でない変数と、空のセグメントができる変数（`APP_`、`APP_A__B`）は読み飛ばす。
     pub fn load_from_env(
         config_manager: &ConfigManager,
         prefix: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        Self::load_from_vars(config_manager, prefix, std::env::vars())
+        Self::load_from_vars(config_manager, prefix, std::env::vars_os())
     }
 
     fn load_from_vars(
         config_manager: &ConfigManager,
         prefix: &str,
-        vars: impl IntoIterator<Item = (String, String)>,
+        vars: impl IntoIterator<Item = (OsString, OsString)>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         // "APP" と "APP_" を同じ扱いにし、APPLE_* のような別名の変数を拾わない。
         let prefix = format!("{}_", prefix.trim_end_matches('_'));
         for (key, value) in vars {
+            let (Ok(key), Ok(value)) = (key.into_string(), value.into_string()) else {
+                continue;
+            };
             if let Some(rest) = key.strip_prefix(&prefix) {
                 let config_path = rest
                     .trim_start_matches('_')
                     .to_lowercase()
                     .replace('_', ".");
+                if config_path.split('.').any(str::is_empty) {
+                    continue;
+                }
 
                 let config_value = Self::parse_env_value(&value);
                 config_manager.set_config(&config_path, config_value)?;
@@ -60,7 +74,7 @@ impl ConfigLoader {
         Ok(())
     }
 
-    /// 設定ファイルの形式を自動判定して読み込み
+    /// 拡張子（`.json` / `.toml`）で形式を判定して読み込む。
     pub fn auto_load<P: AsRef<Path>>(
         config_manager: &ConfigManager,
         path: P,
@@ -72,13 +86,13 @@ impl ConfigLoader {
             Some("toml") => Self::load_from_toml(config_manager, path),
             Some("yaml") | Some("yml") => {
                 // YAMLサポートはserde_yamlクレートが必要
-                Err("YAML support not implemented".into())
+                Err(format!("YAML support not implemented: {}", path_ref.display()).into())
             }
-            _ => Err("Unsupported file format".into()),
+            _ => Err(format!("Unsupported file format: {}", path_ref.display()).into()),
         }
     }
 
-    /// 複数の設定ファイルを順次読み込み（後から読み込まれた値で上書き）
+    /// 複数のファイルを順に読み込む。後のファイルの値が優先され、最初のエラーで止まる。
     pub fn load_multiple<P: AsRef<Path>>(
         config_manager: &ConfigManager,
         paths: Vec<P>,
@@ -89,7 +103,7 @@ impl ConfigLoader {
         Ok(())
     }
 
-    /// デフォルト設定を適用
+    /// アプリケーションの既定値を設定する。
     pub fn apply_defaults(config_manager: &ConfigManager) -> Result<(), String> {
         // アプリケーションのデフォルト設定
         config_manager.set_config("app.name", ConfigValue::String("DefaultApp".to_string()))?;
@@ -120,8 +134,8 @@ impl ConfigLoader {
         Ok(())
     }
 
-    /// 設定の検証を実行
-    pub fn validate_config(config_manager: &ConfigManager) -> Result<Vec<String>, String> {
+    /// 必須項目の欠落と値の範囲を検査し、警告の一覧を返す。問題が無ければ空。
+    pub fn validate_config(config_manager: &ConfigManager) -> Vec<String> {
         let mut warnings = Vec::new();
 
         // 必須設定の確認
@@ -152,7 +166,11 @@ impl ConfigLoader {
             warnings.push("server.worker_threads should be between 1 and 1000".to_string());
         }
 
-        Ok(warnings)
+        warnings
+    }
+
+    fn read_file(path: &Path) -> Result<String, String> {
+        fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))
     }
 
     // プライベートヘルパーメソッド
@@ -273,7 +291,7 @@ mod tests {
         );
 
         // 設定の検証
-        let warnings = ConfigLoader::validate_config(&config).unwrap();
+        let warnings = ConfigLoader::validate_config(&config);
         assert!(warnings.is_empty());
     }
 
@@ -281,10 +299,24 @@ mod tests {
         Path::new(env!("CARGO_MANIFEST_DIR")).join(name)
     }
 
-    fn write_temp(name: &str, content: &str) -> std::path::PathBuf {
+    struct TempFile(std::path::PathBuf);
+
+    impl AsRef<Path> for TempFile {
+        fn as_ref(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempFile {
+        fn drop(&mut self) {
+            let _ = fs::remove_file(&self.0);
+        }
+    }
+
+    fn write_temp(name: &str, content: &str) -> TempFile {
         let path = std::env::temp_dir().join(format!("hss_{}_{}", std::process::id(), name));
         fs::write(&path, content).unwrap();
-        path
+        TempFile(path)
     }
 
     fn s(v: &str) -> ConfigValue {
@@ -368,10 +400,20 @@ mod tests {
     #[test]
     fn load_fails_on_missing_file_and_invalid_syntax() {
         let config = ConfigManager::new("t".to_string());
-        assert!(ConfigLoader::load_from_json(&config, "no_such.json").is_err());
-        assert!(ConfigLoader::load_from_toml(&config, "no_such.toml").is_err());
-        assert!(ConfigLoader::load_from_json(&config, write_temp("bad.json", "{")).is_err());
-        assert!(ConfigLoader::load_from_toml(&config, write_temp("bad.toml", "a = ")).is_err());
+        let errors = [
+            ConfigLoader::load_from_json(&config, "no_such.json"),
+            ConfigLoader::load_from_toml(&config, "no_such.toml"),
+            ConfigLoader::load_from_json(&config, write_temp("bad.json", "{")),
+            ConfigLoader::load_from_toml(&config, write_temp("bad.toml", "a = ")),
+        ];
+        for (err, name) in
+            errors
+                .into_iter()
+                .zip(["no_such.json", "no_such.toml", "bad.json", "bad.toml"])
+        {
+            let message = err.unwrap_err().to_string();
+            assert!(message.contains(name), "{message}");
+        }
     }
 
     #[test]
@@ -383,11 +425,14 @@ mod tests {
         assert_eq!(config.get_config("k"), Some(s("toml")));
         for name in ["c.yaml", "c.yml"] {
             let err = ConfigLoader::auto_load(&config, name).unwrap_err();
-            assert_eq!(err.to_string(), "YAML support not implemented");
+            assert_eq!(
+                err.to_string(),
+                format!("YAML support not implemented: {name}")
+            );
         }
         for name in ["c.ini", "noext"] {
             let err = ConfigLoader::auto_load(&config, name).unwrap_err();
-            assert_eq!(err.to_string(), "Unsupported file format");
+            assert_eq!(err.to_string(), format!("Unsupported file format: {name}"));
         }
     }
 
@@ -396,21 +441,38 @@ mod tests {
         let first = write_temp("m1.toml", "k = \"first\"\nonly_first = 1");
         let second = write_temp("m2.json", r#"{"k":"second"}"#);
         let config = ConfigManager::new("t".to_string());
-        ConfigLoader::load_multiple(&config, vec![first.clone(), second]).unwrap();
+        ConfigLoader::load_multiple(&config, vec![first.as_ref(), second.as_ref()]).unwrap();
         assert_eq!(config.get_config("k"), Some(s("second")));
         assert_eq!(
             config.get_config("only_first"),
             Some(ConfigValue::Integer(1))
         );
-        let bad = Path::new("bad.ini").to_path_buf();
-        assert!(ConfigLoader::load_multiple(&config, vec![bad, first]).is_err());
+        let bad = Path::new("bad.ini");
+        assert!(ConfigLoader::load_multiple(&config, vec![bad, first.as_ref()]).is_err());
+        let first_path = first.0.clone();
+        drop(first);
+        assert!(!first_path.exists());
     }
 
-    fn vars(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+    fn vars(pairs: &[(&str, &str)]) -> Vec<(OsString, OsString)> {
         pairs
             .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .map(|(k, v)| (OsString::from(k), OsString::from(v)))
             .collect()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn load_from_vars_skips_non_utf8_entries() {
+        use std::os::unix::ffi::OsStringExt;
+        let invalid = || OsString::from_vec(vec![0xff, 0xfe]);
+        let mut env = vars(&[("HSSTEST_OK", "1")]);
+        env.push((OsString::from("HSSTEST_BAD_VALUE"), invalid()));
+        env.push((invalid(), OsString::from("x")));
+        let config = ConfigManager::new("t".to_string());
+        ConfigLoader::load_from_vars(&config, "HSSTEST", env).unwrap();
+        assert_eq!(config.get_config("ok"), Some(ConfigValue::Integer(1)));
+        assert_eq!(config.get_config("bad.value"), None);
     }
 
     #[test]
@@ -420,6 +482,8 @@ mod tests {
             ("HSSTEST_DATABASE_PORT", "5433"),
             ("HSSTESTX_LEAK", "1"),
             ("OTHER_KEY", "x"),
+            ("HSSTEST_", "empty"),
+            ("HSSTEST_A__B", "gap"),
         ]);
         for prefix in ["HSSTEST", "HSSTEST_"] {
             let config = ConfigManager::new("t".to_string());
@@ -434,6 +498,8 @@ mod tests {
             );
             assert_eq!(config.get_config("x.leak"), None, "{prefix}");
             assert_eq!(config.get_config("key"), None, "{prefix}");
+            assert_eq!(config.get_config(""), None, "{prefix}");
+            assert_eq!(config.get_config("a"), None, "{prefix}");
         }
     }
 
@@ -492,7 +558,7 @@ mod tests {
         config
             .set_config("server.worker_threads", ConfigValue::Integer(threads))
             .unwrap();
-        ConfigLoader::validate_config(&config).unwrap()
+        ConfigLoader::validate_config(&config)
     }
 
     #[test]
@@ -512,7 +578,7 @@ mod tests {
     #[test]
     fn validate_config_reports_missing_required_keys() {
         let config = ConfigManager::new("t".to_string());
-        let warnings = ConfigLoader::validate_config(&config).unwrap();
+        let warnings = ConfigLoader::validate_config(&config);
         assert_eq!(
             warnings,
             vec![

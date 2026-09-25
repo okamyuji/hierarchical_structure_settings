@@ -48,4 +48,9 @@ fn demo_binary_loads_config_files_and_env() {
         assert!(!stdout.contains(secret), "{secret} leaked:\n{stdout}");
     }
     assert!(stdout.contains("password= ***"), "{stdout}");
+    let position = |needle: &str| stdout.find(needle).unwrap_or_else(|| panic!("{needle}"));
+    assert!(
+        position("\n  app/") < position("\n  database/"),
+        "children must be sorted"
+    );
 }
