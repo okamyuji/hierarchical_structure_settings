@@ -1,5 +1,5 @@
-use hierarchical_structure_settings::{ConfigManager, ConfigValue};
 use hierarchical_structure_settings::config_loader::ConfigLoader;
+use hierarchical_structure_settings::{ConfigManager, ConfigValue};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=== 階層型設定管理システム デモ ===");
@@ -11,7 +11,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. 外部設定ファイルからの読み込み
     println!("1. 外部設定ファイルからの読み込み:");
     load_config_files(&config)?;
-    
+
     // 設定ツリーを表示
     println!("\n外部ファイルから読み込んだ設定ツリー:");
     config.display_tree();
@@ -20,12 +20,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n2. プログラムでの追加設定:");
     add_runtime_config(&config)?;
 
-    
     // 3. 設定値の取得と使用例
     println!("\n3. 設定値の取得例:");
     demonstrate_config_usage(&config);
 
-    // 4. 設定値の更新例  
+    // 4. 設定値の更新例
     println!("\n4. 設定値の更新例:");
     demonstrate_config_updates(&config)?;
 
@@ -47,7 +46,7 @@ fn load_config_files(config: &ConfigManager) -> Result<(), Box<dyn std::error::E
     } else {
         println!("  ⚠ config.tomlが見つかりません");
     }
-    
+
     // JSONファイルの読み込み（追加設定として）
     if std::path::Path::new("config.json").exists() {
         println!("  config.jsonから追加設定を読み込んでいます...");
@@ -56,7 +55,7 @@ fn load_config_files(config: &ConfigManager) -> Result<(), Box<dyn std::error::E
     } else {
         println!("  ⚠ config.jsonが見つかりません");
     }
-    
+
     // 環境変数からの読み込み
     println!("  環境変数から設定を読み込んでいます (APP_プレフィックス)...");
     match ConfigLoader::load_from_env(config, "APP_") {
@@ -70,20 +69,37 @@ fn load_config_files(config: &ConfigManager) -> Result<(), Box<dyn std::error::E
 /// プログラムでの追加設定を行う（外部ファイルの設定に加えて）
 fn add_runtime_config(config: &ConfigManager) -> Result<(), String> {
     println!("  実行時に追加の設定をプログラムから行います:");
-    
+
     // 実行時にのみ決まる動的設定
-    config.set_config("runtime.session_id", ConfigValue::String(uuid::Uuid::new_v4().to_string()))?;
-    config.set_config("runtime.start_time", ConfigValue::Integer(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64))?;
-    config.set_config("runtime.pid", ConfigValue::Integer(std::process::id() as i64))?;
-    
+    config.set_config(
+        "runtime.session_id",
+        ConfigValue::String(uuid::Uuid::new_v4().to_string()),
+    )?;
+    config.set_config(
+        "runtime.start_time",
+        ConfigValue::Integer(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i64,
+        ),
+    )?;
+    config.set_config(
+        "runtime.pid",
+        ConfigValue::Integer(std::process::id() as i64),
+    )?;
+
     // デバッグモードを開発中として強制有効化（外部設定を上書き）
     config.set_config("debug.enabled", ConfigValue::Boolean(true))?;
     config.set_config("debug.log_level", ConfigValue::String("DEBUG".to_string()))?;
-    
+
     // 追加の機能フラグ（実験的機能）
     config.set_config("features.experimental_ui", ConfigValue::Boolean(true))?;
-    config.set_config("features.performance_monitoring", ConfigValue::Boolean(true))?;
-    
+    config.set_config(
+        "features.performance_monitoring",
+        ConfigValue::Boolean(true),
+    )?;
+
     println!("  ✓ 実行時設定の追加完了");
     Ok(())
 }
@@ -103,23 +119,28 @@ fn demonstrate_config_usage(config: &ConfigManager) {
     let db_host = config.get_config("database.host");
     let db_port = config.get_config("database.port");
     let db_name = config.get_config("database.name");
-    
+
     println!("\nデータベース接続情報:");
     println!("  ホスト: {:?}", db_host);
-    println!("  ポート: {:?}", db_port);  
+    println!("  ポート: {:?}", db_port);
     println!("  データベース: {:?}", db_name);
 
     // サーバー設定の取得
-    if let (Some(ConfigValue::String(host)), Some(ConfigValue::Integer(port))) = 
-        (config.get_config("server.host"), config.get_config("server.port")) {
+    if let (Some(ConfigValue::String(host)), Some(ConfigValue::Integer(port))) = (
+        config.get_config("server.host"),
+        config.get_config("server.port"),
+    ) {
         println!("\nサーバー設定:");
         println!("  バインドアドレス: {}:{}", host, port);
     }
 
     // デバッグ設定の確認
     if let Some(ConfigValue::Boolean(debug_enabled)) = config.get_config("debug.enabled") {
-        println!("\nデバッグモード: {}", if debug_enabled { "有効" } else { "無効" });
-        
+        println!(
+            "\nデバッグモード: {}",
+            if debug_enabled { "有効" } else { "無効" }
+        );
+
         if debug_enabled
             && let Some(ConfigValue::String(log_level)) = config.get_config("debug.log_level")
         {
@@ -152,7 +173,7 @@ fn demonstrate_config_usage(config: &ConfigManager) {
 /// 設定値の更新デモ
 fn demonstrate_config_updates(config: &ConfigManager) -> Result<(), String> {
     println!("デバッグモードを無効化...");
-    
+
     // 現在の値を表示
     if let Some(current_debug) = config.get_config("debug.enabled") {
         println!("現在のデバッグ設定: {:?}", current_debug);
@@ -160,9 +181,9 @@ fn demonstrate_config_updates(config: &ConfigManager) -> Result<(), String> {
 
     config.update_config("debug.enabled", ConfigValue::Boolean(false))?;
     config.update_config("debug.log_level", ConfigValue::String("INFO".to_string()))?;
-    
+
     println!("デバッグ設定を更新しました");
-    
+
     // 更新後の値を確認
     if let Some(updated_debug) = config.get_config("debug.enabled") {
         println!("更新後のデバッグ設定: {:?}", updated_debug);
@@ -184,7 +205,10 @@ fn demonstrate_array_config(config: &ConfigManager) -> Result<(), String> {
         ConfigValue::String("https://app.example.com".to_string()),
         ConfigValue::String("https://admin.example.com".to_string()),
     ];
-    config.set_config("security.cors.allowed_origins", ConfigValue::Array(allowed_origins))?;
+    config.set_config(
+        "security.cors.allowed_origins",
+        ConfigValue::Array(allowed_origins),
+    )?;
 
     // サポートする言語のリストを設定
     let supported_locales = vec![
@@ -193,7 +217,10 @@ fn demonstrate_array_config(config: &ConfigManager) -> Result<(), String> {
         ConfigValue::String("zh_CN".to_string()),
         ConfigValue::String("ko_KR".to_string()),
     ];
-    config.set_config("i18n.supported_locales", ConfigValue::Array(supported_locales))?;
+    config.set_config(
+        "i18n.supported_locales",
+        ConfigValue::Array(supported_locales),
+    )?;
 
     // 通知チャンネルのリストを設定
     let notification_channels = vec![
@@ -201,11 +228,14 @@ fn demonstrate_array_config(config: &ConfigManager) -> Result<(), String> {
         ConfigValue::String("slack".to_string()),
         ConfigValue::String("webhook".to_string()),
     ];
-    config.set_config("notifications.channels", ConfigValue::Array(notification_channels))?;
+    config.set_config(
+        "notifications.channels",
+        ConfigValue::Array(notification_channels),
+    )?;
 
     // 設定した配列の内容を表示
     println!("設定した配列:");
-    
+
     if let Some(ConfigValue::Array(origins)) = config.get_config("security.cors.allowed_origins") {
         println!("  許可されたオリジン:");
         for origin in origins {

@@ -13,7 +13,7 @@ impl ConfigLoader {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let content = fs::read_to_string(path)?;
         let json_value: Value = serde_json::from_str(&content)?;
-        
+
         Self::load_json_value(config_manager, &json_value, String::new())?;
         Ok(())
     }
@@ -25,7 +25,7 @@ impl ConfigLoader {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let content = fs::read_to_string(path)?;
         let toml_value: toml::Value = toml::from_str(&content)?;
-        
+
         Self::load_toml_value(config_manager, &toml_value, String::new())?;
         Ok(())
     }
@@ -36,7 +36,7 @@ impl ConfigLoader {
         prefix: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
         use std::env;
-        
+
         for (key, value) in env::vars() {
             if key.starts_with(prefix) {
                 let config_path = key
@@ -45,12 +45,12 @@ impl ConfigLoader {
                     .trim_start_matches('_')
                     .to_lowercase()
                     .replace('_', ".");
-                
+
                 let config_value = Self::parse_env_value(&value);
                 config_manager.set_config(&config_path, config_value)?;
             }
         }
-        
+
         Ok(())
     }
 
@@ -60,7 +60,7 @@ impl ConfigLoader {
         path: P,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let path_ref = path.as_ref();
-        
+
         match path_ref.extension().and_then(|s| s.to_str()) {
             Some("json") => Self::load_from_json(config_manager, path),
             Some("toml") => Self::load_from_toml(config_manager, path),
@@ -88,47 +88,50 @@ impl ConfigLoader {
         // アプリケーションのデフォルト設定
         config_manager.set_config("app.name", ConfigValue::String("DefaultApp".to_string()))?;
         config_manager.set_config("app.version", ConfigValue::String("1.0.0".to_string()))?;
-        
+
         // データベースのデフォルト設定
-        config_manager.set_config("database.host", ConfigValue::String("localhost".to_string()))?;
+        config_manager.set_config(
+            "database.host",
+            ConfigValue::String("localhost".to_string()),
+        )?;
         config_manager.set_config("database.port", ConfigValue::Integer(5432))?;
         config_manager.set_config("database.timeout_seconds", ConfigValue::Integer(30))?;
         config_manager.set_config("database.ssl_enabled", ConfigValue::Boolean(false))?;
-        
+
         // サーバーのデフォルト設定
         config_manager.set_config("server.host", ConfigValue::String("127.0.0.1".to_string()))?;
         config_manager.set_config("server.port", ConfigValue::Integer(8080))?;
         config_manager.set_config("server.worker_threads", ConfigValue::Integer(4))?;
-        
+
         // デバッグのデフォルト設定
         config_manager.set_config("debug.enabled", ConfigValue::Boolean(false))?;
         config_manager.set_config("debug.log_level", ConfigValue::String("INFO".to_string()))?;
-        
+
         // キャッシュのデフォルト設定
         config_manager.set_config("cache.enabled", ConfigValue::Boolean(true))?;
         config_manager.set_config("cache.ttl_seconds", ConfigValue::Integer(3600))?;
-        
+
         Ok(())
     }
 
     /// 設定の検証を実行
     pub fn validate_config(config_manager: &ConfigManager) -> Result<Vec<String>, String> {
         let mut warnings = Vec::new();
-        
+
         // 必須設定の確認
         let required_configs = vec![
             "database.host",
-            "database.port", 
+            "database.port",
             "server.host",
             "server.port",
         ];
-        
+
         for config_path in required_configs {
             if config_manager.get_config(config_path).is_none() {
                 warnings.push(format!("Required configuration missing: {}", config_path));
             }
         }
-        
+
         // 値の範囲チェック
         if let Some(ConfigValue::Integer(port)) = config_manager.get_config("server.port")
             && !(1..=65535).contains(&port)
@@ -136,12 +139,13 @@ impl ConfigLoader {
             warnings.push("server.port must be between 1 and 65535".to_string());
         }
 
-        if let Some(ConfigValue::Integer(threads)) = config_manager.get_config("server.worker_threads")
+        if let Some(ConfigValue::Integer(threads)) =
+            config_manager.get_config("server.worker_threads")
             && !(1..=1000).contains(&threads)
         {
             warnings.push("server.worker_threads should be between 1 and 1000".to_string());
         }
-        
+
         Ok(warnings)
     }
 
@@ -248,10 +252,10 @@ mod tests {
     #[test]
     fn test_config_loading() {
         let config = ConfigManager::new("test".to_string());
-        
+
         // デフォルト設定を適用
         ConfigLoader::apply_defaults(&config).unwrap();
-        
+
         // 設定値の確認
         assert_eq!(
             config.get_config("database.host"),
@@ -261,7 +265,7 @@ mod tests {
             config.get_config("database.port"),
             Some(ConfigValue::Integer(5432))
         );
-        
+
         // 設定の検証
         let warnings = ConfigLoader::validate_config(&config).unwrap();
         assert!(warnings.is_empty());
@@ -286,15 +290,24 @@ mod tests {
         let config = ConfigManager::new("t".to_string());
         ConfigLoader::load_from_toml(&config, fixture("config.toml")).unwrap();
         assert!(config.get_config("app.name").is_some());
-        assert!(matches!(config.get_config("database.port"), Some(ConfigValue::Integer(_))));
+        assert!(matches!(
+            config.get_config("database.port"),
+            Some(ConfigValue::Integer(_))
+        ));
     }
 
     #[test]
     fn loads_nested_values_from_json_file() {
         let config = ConfigManager::new("t".to_string());
         ConfigLoader::load_from_json(&config, fixture("config.json")).unwrap();
-        assert_eq!(config.get_config("database.pool.min_connections"), Some(ConfigValue::Integer(5)));
-        assert_eq!(config.get_config("database.ssl_enabled"), Some(ConfigValue::Boolean(true)));
+        assert_eq!(
+            config.get_config("database.pool.min_connections"),
+            Some(ConfigValue::Integer(5))
+        );
+        assert_eq!(
+            config.get_config("database.ssl_enabled"),
+            Some(ConfigValue::Boolean(true))
+        );
         assert_eq!(
             config.get_config("database.replication.slave_hosts"),
             Some(ConfigValue::Array(vec![
@@ -379,7 +392,10 @@ mod tests {
         let config = ConfigManager::new("t".to_string());
         ConfigLoader::load_multiple(&config, vec![first.clone(), second]).unwrap();
         assert_eq!(config.get_config("k"), Some(s("second")));
-        assert_eq!(config.get_config("only_first"), Some(ConfigValue::Integer(1)));
+        assert_eq!(
+            config.get_config("only_first"),
+            Some(ConfigValue::Integer(1))
+        );
         let bad = Path::new("bad.ini").to_path_buf();
         assert!(ConfigLoader::load_multiple(&config, vec![bad, first]).is_err());
     }
@@ -393,16 +409,31 @@ mod tests {
         }
         let config = ConfigManager::new("t".to_string());
         ConfigLoader::load_from_env(&config, "HSSTEST").unwrap();
-        assert_eq!(config.get_config("database.host"), Some(s("db.example.com")));
-        assert_eq!(config.get_config("database.port"), Some(ConfigValue::Integer(5433)));
+        assert_eq!(
+            config.get_config("database.host"),
+            Some(s("db.example.com"))
+        );
+        assert_eq!(
+            config.get_config("database.port"),
+            Some(ConfigValue::Integer(5433))
+        );
         assert_eq!(config.get_config("hsstest"), None);
     }
 
     #[test]
     fn parse_env_value_prefers_integer_then_bool_then_string() {
-        assert_eq!(ConfigLoader::parse_env_value("-42"), ConfigValue::Integer(-42));
-        assert_eq!(ConfigLoader::parse_env_value("true"), ConfigValue::Boolean(true));
-        assert_eq!(ConfigLoader::parse_env_value("false"), ConfigValue::Boolean(false));
+        assert_eq!(
+            ConfigLoader::parse_env_value("-42"),
+            ConfigValue::Integer(-42)
+        );
+        assert_eq!(
+            ConfigLoader::parse_env_value("true"),
+            ConfigValue::Boolean(true)
+        );
+        assert_eq!(
+            ConfigLoader::parse_env_value("false"),
+            ConfigValue::Boolean(false)
+        );
         assert_eq!(ConfigLoader::parse_env_value("TRUE"), s("TRUE"));
     }
 
@@ -431,7 +462,9 @@ mod tests {
     fn warnings_for(port: i64, threads: i64) -> Vec<String> {
         let config = ConfigManager::new("t".to_string());
         ConfigLoader::apply_defaults(&config).unwrap();
-        config.set_config("server.port", ConfigValue::Integer(port)).unwrap();
+        config
+            .set_config("server.port", ConfigValue::Integer(port))
+            .unwrap();
         config
             .set_config("server.worker_threads", ConfigValue::Integer(threads))
             .unwrap();

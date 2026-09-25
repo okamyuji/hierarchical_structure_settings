@@ -250,7 +250,9 @@ mod tests {
         let config = ConfigManager::new("app".to_string());
         config.set_config("a.b", ConfigValue::Integer(1)).unwrap();
         config.set_config("a.b.c", ConfigValue::Integer(9)).unwrap();
-        config.update_config("a.b", ConfigValue::Integer(2)).unwrap();
+        config
+            .update_config("a.b", ConfigValue::Integer(2))
+            .unwrap();
         assert_eq!(config.get_config("a.b"), Some(ConfigValue::Integer(2)));
         assert_eq!(config.get_config("a.b.c"), Some(ConfigValue::Integer(9)));
     }

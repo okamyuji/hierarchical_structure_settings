@@ -24,7 +24,13 @@ fn demo_binary_loads_config_files_and_env() {
         "    - webhook",
         "=== デモ完了 ===",
     ] {
-        assert!(stdout.contains(expected), "missing {expected:?} in:\n{stdout}");
+        assert!(
+            stdout.contains(expected),
+            "missing {expected:?} in:\n{stdout}"
+        );
     }
-    assert!(!stdout.contains("leak= "), "APPX_ must not be loaded:\n{stdout}");
+    assert!(
+        !stdout.contains("leak= "),
+        "APPX_ must not be loaded:\n{stdout}"
+    );
 }
