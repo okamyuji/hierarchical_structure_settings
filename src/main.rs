@@ -19,6 +19,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     ] {
         config.allow_display(pattern)?;
     }
+    for (path, _) in DEMO_FEATURES {
+        config.allow_display(path)?;
+    }
 
     // 1. 外部設定ファイルからの読み込み
     println!("1. 外部設定ファイルからの読み込み:");
@@ -159,20 +162,19 @@ fn demonstrate_config_usage(config: &ConfigManager) {
     print_features(config);
 }
 
-fn print_features(config: &ConfigManager) {
-    println!("\n有効な機能:");
-    let features = [
-        ("user_registration", "ユーザー登録"),
-        ("email_verification", "メール認証"),
-        ("two_factor_auth", "二段階認証"),
-        ("admin_panel", "管理パネル"),
-        ("api_v2", "API v2"),
-    ];
+const DEMO_FEATURES: [(&str, &str); 5] = [
+    ("features.user_registration", "ユーザー登録"),
+    ("features.email_verification", "メール認証"),
+    ("features.two_factor_auth", "二段階認証"),
+    ("features.admin_panel", "管理パネル"),
+    ("features.api_v2", "API v2"),
+];
 
-    for (feature_key, feature_name) in features {
-        let path = format!("features.{}", feature_key);
-        if let Some(ConfigValue::Boolean(enabled)) = config.get_config(&path) {
-            println!("  {} {}", if enabled { "✓" } else { "✗" }, feature_name);
+fn print_features(config: &ConfigManager) {
+    println!("\n機能フラグ:");
+    for (path, feature_name) in DEMO_FEATURES {
+        if let Some(shown) = config.get_display(path) {
+            println!("  {}: {}", feature_name, shown);
         }
     }
 }

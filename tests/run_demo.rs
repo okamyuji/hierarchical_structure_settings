@@ -16,6 +16,7 @@ fn demo_binary_loads_config_files_and_env() {
         .env("APP_API_TOKEN", "tok123")
         .env("APP_APP_SECRET", "appsec")
         .env("APP_FEATURES_API_TOKEN", "feattok")
+        .env("APP_FEATURES_BETA_SECRET_FLAG", "true")
         .env("APP_DATABASE_HOST", "postgres://u:hostpw@db/app")
         .output()
         .unwrap();
@@ -35,8 +36,8 @@ fn demo_binary_loads_config_files_and_env() {
         "✓ 実行時設定の追加完了",
         "アプリケーション名: HierarchicalConfigApp",
         "  ログレベル: DEBUG",
-        "  ✓ ユーザー登録",
-        "  ✗ API v2",
+        "  ユーザー登録: true",
+        "  API v2: false",
         "更新後のデバッグ設定: false",
         "現在のデバッグ設定: true",
         "更新後のログレベル: INFO",
@@ -66,6 +67,7 @@ fn demo_binary_loads_config_files_and_env() {
         assert!(!stdout.contains(secret), "{secret} leaked:\n{stdout}");
     }
     assert!(stdout.contains("password= ***"), "{stdout}");
+    assert!(stdout.contains("flag= ***"), "{stdout}");
     let position = |needle: &str| stdout.find(needle).unwrap_or_else(|| panic!("{needle}"));
     assert!(
         position("\n  app/") < position("\n  database/"),
