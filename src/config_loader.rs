@@ -9,6 +9,8 @@ pub struct ConfigLoader;
 
 impl ConfigLoader {
     /// JSON ファイルを読み込む。エラーにはファイルのパスを含める。
+    ///
+    /// `null`、小数、`i64` に収まらない整数は読み飛ばす。配列の中でも同様に捨てるので、要素の位置がずれる。
     pub fn load_from_json<P: AsRef<Path>>(
         config_manager: &ConfigManager,
         path: P,
@@ -18,11 +20,14 @@ impl ConfigLoader {
         let json_value: Value =
             serde_json::from_str(&content).map_err(|e| format!("{}: {e}", path.display()))?;
 
-        Self::load_json_value(config_manager, &json_value, String::new())?;
+        Self::load_json_value(config_manager, &json_value, String::new())
+            .map_err(|e| format!("{}: {e}", path.display()))?;
         Ok(())
     }
 
     /// TOML ファイルを読み込む。エラーにはファイルのパスを含める。
+    ///
+    /// 小数と日時は読み飛ばす。配列の中でも同様に捨てるので、要素の位置がずれる。
     pub fn load_from_toml<P: AsRef<Path>>(
         config_manager: &ConfigManager,
         path: P,
@@ -32,7 +37,8 @@ impl ConfigLoader {
         let toml_value: toml::Value =
             toml::from_str(&content).map_err(|e| format!("{}: {e}", path.display()))?;
 
-        Self::load_toml_value(config_manager, &toml_value, String::new())?;
+        Self::load_toml_value(config_manager, &toml_value, String::new())
+            .map_err(|e| format!("{}: {e}", path.display()))?;
         Ok(())
     }
 
@@ -395,6 +401,24 @@ mod tests {
                 ConfigValue::Array(vec![]),
             ]))
         );
+    }
+
+    #[test]
+    fn content_errors_include_file_path() {
+        let config = ConfigManager::new("t".to_string());
+        let json = write_temp("emptykey.json", r#"{"": 1}"#);
+        let toml = write_temp("emptykey.toml", "\"\" = 1");
+        for message in [
+            ConfigLoader::load_from_json(&config, &json)
+                .unwrap_err()
+                .to_string(),
+            ConfigLoader::load_from_toml(&config, &toml)
+                .unwrap_err()
+                .to_string(),
+        ] {
+            assert!(message.contains("emptykey."), "{message}");
+            assert!(message.contains("Invalid config path"), "{message}");
+        }
     }
 
     #[test]

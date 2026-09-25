@@ -104,26 +104,27 @@ fn add_runtime_config(config: &ConfigManager) -> Result<(), String> {
 
 /// 設定値の取得と使用方法のデモ
 fn demonstrate_config_usage(config: &ConfigManager) {
-    // 基本的な設定値の取得
-    if let Some(app_name) = config.get_config("app.name") {
-        println!("アプリケーション名: {:?}", app_name);
+    if let Some(app_name) = config.get_display("app.name") {
+        println!("アプリケーション名: {}", app_name);
     }
 
     if let Some(ConfigValue::String(env)) = config.get_config("app.environment") {
         println!("実行環境: {}", env);
     }
 
-    // データベース接続情報の取得
-    let db_host = config.get_config("database.host");
-    let db_port = config.get_config("database.port");
-    let db_name = config.get_config("database.database_name");
-
+    // 接続情報は資格情報入りの URL を含み得るので、マスク付きの get_display で表示する。
     println!("\nデータベース接続情報:");
-    println!("  ホスト: {:?}", db_host);
-    println!("  ポート: {:?}", db_port);
-    println!("  データベース: {:?}", db_name);
+    for (label, path) in [
+        ("ホスト", "database.host"),
+        ("ポート", "database.port"),
+        ("データベース", "database.database_name"),
+    ] {
+        let shown = config
+            .get_display(path)
+            .unwrap_or_else(|| "未設定".to_string());
+        println!("  {}: {}", label, shown);
+    }
 
-    // サーバー設定の取得
     if let (Some(ConfigValue::String(host)), Some(ConfigValue::Integer(port))) = (
         config.get_config("server.host"),
         config.get_config("server.port"),
@@ -132,7 +133,6 @@ fn demonstrate_config_usage(config: &ConfigManager) {
         println!("  バインドアドレス: {}:{}", host, port);
     }
 
-    // デバッグ設定の確認
     if let Some(ConfigValue::Boolean(debug_enabled)) = config.get_config("debug.enabled") {
         println!(
             "\nデバッグモード: {}",
@@ -146,9 +146,12 @@ fn demonstrate_config_usage(config: &ConfigManager) {
         }
     }
 
-    // 機能フラグの確認
+    print_features(config);
+}
+
+fn print_features(config: &ConfigManager) {
     println!("\n有効な機能:");
-    let features = vec![
+    let features = [
         ("user_registration", "ユーザー登録"),
         ("email_verification", "メール認証"),
         ("two_factor_auth", "二段階認証"),
@@ -159,11 +162,7 @@ fn demonstrate_config_usage(config: &ConfigManager) {
     for (feature_key, feature_name) in features {
         let path = format!("features.{}", feature_key);
         if let Some(ConfigValue::Boolean(enabled)) = config.get_config(&path) {
-            if enabled {
-                println!("  ✓ {}", feature_name);
-            } else {
-                println!("  ✗ {}", feature_name);
-            }
+            println!("  {} {}", if enabled { "✓" } else { "✗" }, feature_name);
         }
     }
 }
@@ -196,70 +195,47 @@ fn demonstrate_config_updates(config: &ConfigManager) -> Result<(), String> {
 }
 
 /// 配列設定のデモ
-fn demonstrate_array_config(config: &ConfigManager) -> Result<(), String> {
-    // 許可されたオリジンのリストを設定
-    let allowed_origins = vec![
-        ConfigValue::String("https://example.com".to_string()),
-        ConfigValue::String("https://app.example.com".to_string()),
-        ConfigValue::String("https://admin.example.com".to_string()),
-    ];
-    config.set_config(
+const ARRAY_DEMOS: [(&str, &str, &[&str]); 3] = [
+    (
         "security.cors.allowed_origins",
-        ConfigValue::Array(allowed_origins),
-    )?;
-
-    // サポートする言語のリストを設定
-    let supported_locales = vec![
-        ConfigValue::String("ja_JP".to_string()),
-        ConfigValue::String("en_US".to_string()),
-        ConfigValue::String("zh_CN".to_string()),
-        ConfigValue::String("ko_KR".to_string()),
-    ];
-    config.set_config(
+        "許可されたオリジン",
+        &[
+            "https://example.com",
+            "https://app.example.com",
+            "https://admin.example.com",
+        ],
+    ),
+    (
         "i18n.supported_locales",
-        ConfigValue::Array(supported_locales),
-    )?;
-
-    // 通知チャンネルのリストを設定
-    let notification_channels = vec![
-        ConfigValue::String("email".to_string()),
-        ConfigValue::String("slack".to_string()),
-        ConfigValue::String("webhook".to_string()),
-    ];
-    config.set_config(
+        "サポート言語",
+        &["ja_JP", "en_US", "zh_CN", "ko_KR"],
+    ),
+    (
         "notifications.channels",
-        ConfigValue::Array(notification_channels),
-    )?;
+        "通知チャンネル",
+        &["email", "slack", "webhook"],
+    ),
+];
 
-    // 設定した配列の内容を表示
+fn demonstrate_array_config(config: &ConfigManager) -> Result<(), String> {
+    for (path, _, items) in ARRAY_DEMOS {
+        let values = items
+            .iter()
+            .map(|s| ConfigValue::String(s.to_string()))
+            .collect();
+        config.set_config(path, ConfigValue::Array(values))?;
+    }
+
     println!("設定した配列:");
-
-    if let Some(ConfigValue::Array(origins)) = config.get_config("security.cors.allowed_origins") {
-        println!("  許可されたオリジン:");
-        for origin in origins {
-            if let ConfigValue::String(url) = origin {
-                println!("    - {}", url);
+    for (path, label, _) in ARRAY_DEMOS {
+        if let Some(ConfigValue::Array(values)) = config.get_config(path) {
+            println!("  {}:", label);
+            for value in values {
+                if let ConfigValue::String(s) = value {
+                    println!("    - {}", s);
+                }
             }
         }
     }
-
-    if let Some(ConfigValue::Array(locales)) = config.get_config("i18n.supported_locales") {
-        println!("  サポート言語:");
-        for locale in locales {
-            if let ConfigValue::String(lang) = locale {
-                println!("    - {}", lang);
-            }
-        }
-    }
-
-    if let Some(ConfigValue::Array(channels)) = config.get_config("notifications.channels") {
-        println!("  通知チャンネル:");
-        for channel in channels {
-            if let ConfigValue::String(ch) = channel {
-                println!("    - {}", ch);
-            }
-        }
-    }
-
     Ok(())
 }

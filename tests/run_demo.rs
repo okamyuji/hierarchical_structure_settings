@@ -14,6 +14,7 @@ fn demo_binary_loads_config_files_and_env() {
         .env("APP_DB_PASSWORD", "31415926535")
         .env("APP_STORAGE_S3_SECRET_KEY", "AKIAREALSECRET")
         .env("APP_API_TOKEN", "tok123")
+        .env("APP_DATABASE_HOST", "postgres://u:hostpw@db/app")
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -22,13 +23,16 @@ fn demo_binary_loads_config_files_and_env() {
         "✓ config.tomlの読み込み完了",
         "✓ config.jsonの読み込み完了",
         "✓ 環境変数の読み込み完了",
-        "データベース: Some(String(\"config_app_db\"))",
+        "データベース: String(\"config_app_db\")",
+        "ホスト: ***",
         "password_reset= Boolean(true)",
         "token_expiry_hours= Integer(24)",
         "\n    value= Integer(77)",
         "✓ 実行時設定の追加完了",
         "アプリケーション名: String(\"HierarchicalConfigApp\")",
         "  ログレベル: DEBUG",
+        "  ✓ ユーザー登録",
+        "  ✗ API v2",
         "更新後のデバッグ設定: Boolean(false)",
         "    - https://admin.example.com",
         "    - ko_KR",
@@ -44,7 +48,13 @@ fn demo_binary_loads_config_files_and_env() {
         !stdout.contains("leak= "),
         "APPX_ must not be loaded:\n{stdout}"
     );
-    for secret in ["CHANGE_ME", "31415926535", "AKIAREALSECRET", "tok123"] {
+    for secret in [
+        "CHANGE_ME",
+        "31415926535",
+        "AKIAREALSECRET",
+        "tok123",
+        "hostpw",
+    ] {
         assert!(!stdout.contains(secret), "{secret} leaked:\n{stdout}");
     }
     assert!(stdout.contains("password= ***"), "{stdout}");

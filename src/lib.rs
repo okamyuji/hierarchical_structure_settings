@@ -9,13 +9,18 @@ pub mod config_loader;
 /// 設定ツリーの葉に入る値。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfigValue {
+    /// 文字列。
     String(String),
+    /// 整数。範囲は `i64`。
     Integer(i64),
+    /// 真偽値。
     Boolean(bool),
+    /// 値の配列。要素の型は混在してよい。
     Array(Vec<ConfigValue>),
 }
 
 /// 設定ツリーのノード。子は名前順に保持し、親は `Weak` で参照して循環参照を避ける。
+#[derive(Debug)]
 pub struct ConfigNode {
     name: String,
     value: RefCell<Option<ConfigValue>>,
@@ -101,14 +106,29 @@ const SENSITIVE_WORDS: &[&str] = &[
     "dsn",
     "bearer",
     "webhook",
+    "pwd",
+    "auth",
+    "authorization",
+    "cookie",
+    "salt",
 ];
 
 // `dbpassword` のように区切りなしで連結された名前も拾う。
-const SENSITIVE_FRAGMENTS: &[&str] = &["password", "passwd", "secret", "credential", "apikey"];
+const SENSITIVE_FRAGMENTS: &[&str] = &[
+    "password",
+    "passwd",
+    "secret",
+    "credential",
+    "apikey",
+    "token",
+    "privatekey",
+    "signingkey",
+    "accesskey",
+];
 
 // 末尾がこれらの語なら秘密値そのものではない（期限、フラグ、ファイルの場所など）。
 const NON_SECRET_LAST_WORDS: &[&str] = &[
-    "hours", "seconds", "attempts", "reset", "header", "file", "path", "enabled",
+    "hours", "seconds", "attempts", "reset", "file", "path", "enabled",
 ];
 
 // 取りこぼしより隠しすぎを選ぶ。環境変数は `_` を `.` に変えて読み込むので、区切りを `_` に揃えて語ごとに照合する。
@@ -132,17 +152,20 @@ fn is_sensitive(path: &str) -> bool {
     words.iter().any(|w| is_word(w)) || SENSITIVE_FRAGMENTS.iter().any(|f| normalized.contains(f))
 }
 
+// パスワードの無い `https://TOKEN@host` や `@` を含む不正な形も、隠す側に倒して扱う。
 fn has_url_credentials(value: &ConfigValue) -> bool {
-    let ConfigValue::String(s) = value else {
-        return false;
-    };
-    let Some((_, rest)) = s.split_once("://") else {
-        return false;
-    };
-    let authority = rest.split('/').next().unwrap_or_default();
-    authority
-        .split_once('@')
-        .is_some_and(|(userinfo, _)| userinfo.contains(':'))
+    match value {
+        ConfigValue::String(s) => s
+            .split_once("://")
+            .and_then(|(_, rest)| rest.rsplit_once('@'))
+            .is_some_and(|(userinfo, _)| !userinfo.is_empty()),
+        ConfigValue::Array(items) => items.iter().any(has_url_credentials),
+        _ => false,
+    }
+}
+
+fn should_mask(path: &str, value: &ConfigValue) -> bool {
+    is_sensitive(path) || has_url_credentials(value)
 }
 
 /// 設定ツリー全体を管理する。
@@ -179,6 +202,16 @@ impl ConfigManager {
         Ok(())
     }
 
+    /// 表示用の文字列を返す。`display_tree` と同じ規則で秘密値は `***` になる。
+    pub fn get_display(&self, path: &str) -> Option<String> {
+        let value = self.get_config(path)?;
+        Some(if should_mask(path, &value) {
+            "***".to_string()
+        } else {
+            format!("{value:?}")
+        })
+    }
+
     /// パスの値を取得する。値を持たない中間ノードは `None`。
     pub fn get_config(&self, path: &str) -> Option<ConfigValue> {
         self.root.get_value(path)
@@ -192,7 +225,7 @@ impl ConfigManager {
     fn display_node(&self, node: &ConfigNode, depth: usize, path: &str) {
         let indent = "  ".repeat(depth);
         match &*node.value.borrow() {
-            Some(value) if is_sensitive(path) || has_url_credentials(value) => {
+            Some(value) if should_mask(path, value) => {
                 println!("{}{}= ***", indent, node.name())
             }
             Some(value) => println!("{}{}= {:?}", indent, node.name(), value),
@@ -214,7 +247,7 @@ impl ConfigManager {
         let mut node = self.root.clone();
         for part in path.split('.') {
             let child = node.children.borrow().get(part).cloned();
-            node = child.ok_or_else(|| format!("Path not found: {path}"))?;
+            node = child.ok_or_else(|| format!("Path not found: {path:?}"))?;
         }
         node.value.replace(Some(value));
         Ok(())
@@ -367,15 +400,25 @@ mod tests {
             "slack_webhook",
             "auth_bearer",
             "api-key",
+            "accesstoken",
+            "authToken",
+            "privateKey",
+            "signingkey",
+            "accesskey",
+            "auth.header",
+            "authorization.header",
+            "db.pwd",
+            "auth",
+            "session.cookie",
+            "hash.salt",
+            "api.auth.api_key_header",
         ] {
             assert!(is_sensitive(path), "{path}");
         }
         for path in [
             "database.host",
-            "api.auth.methods",
             "server.port",
             "security.token_expiry_hours",
-            "api.auth.api_key_header",
             "features.password_reset",
             "server.tls.key_file",
             "api.base_path",
@@ -392,10 +435,44 @@ mod tests {
         let s = |v: &str| ConfigValue::String(v.to_string());
         assert!(has_url_credentials(&s("postgres://user:pw@db:5432/app")));
         assert!(has_url_credentials(&s("https://u:p@example.com")));
-        assert!(!has_url_credentials(&s("https://example.com/a@b")));
-        assert!(!has_url_credentials(&s("ssh://git@github.com/repo")));
+        assert!(has_url_credentials(&s("https://ghp_token@github.com")));
+        assert!(has_url_credentials(&s("http://u@x:PW@h")));
+        assert!(has_url_credentials(&s("http://u:p/PW@h")));
+        assert!(has_url_credentials(&ConfigValue::Array(vec![
+            s("https://example.com"),
+            s("https://u:PW@h"),
+        ])));
+        assert!(!has_url_credentials(&ConfigValue::Array(vec![s(
+            "https://example.com"
+        )])));
+        assert!(!has_url_credentials(&s("https://example.com/path")));
+        assert!(!has_url_credentials(&s("https://@example.com")));
         assert!(!has_url_credentials(&s("user:pw@host")));
         assert!(!has_url_credentials(&ConfigValue::Integer(1)));
+    }
+
+    #[test]
+    fn get_display_masks_secrets_and_formats_values() {
+        let config = ConfigManager::new("app".to_string());
+        config
+            .set_config("db.password", ConfigValue::String("pw".to_string()))
+            .unwrap();
+        config
+            .set_config(
+                "db.host",
+                ConfigValue::String("postgres://u:p@h".to_string()),
+            )
+            .unwrap();
+        config
+            .set_config("db.port", ConfigValue::Integer(5432))
+            .unwrap();
+        assert_eq!(config.get_display("db.password"), Some("***".to_string()));
+        assert_eq!(config.get_display("db.host"), Some("***".to_string()));
+        assert_eq!(
+            config.get_display("db.port"),
+            Some("Integer(5432)".to_string())
+        );
+        assert_eq!(config.get_display("db.missing"), None);
     }
 
     #[test]
@@ -404,11 +481,11 @@ mod tests {
         config.set_config("a.b", ConfigValue::Integer(1)).unwrap();
         assert_eq!(
             config.update_config("a.x", ConfigValue::Integer(2)),
-            Err("Path not found: a.x".to_string())
+            Err("Path not found: \"a.x\"".to_string())
         );
         assert_eq!(
             config.update_config("z.b", ConfigValue::Integer(2)),
-            Err("Path not found: z.b".to_string())
+            Err("Path not found: \"z.b\"".to_string())
         );
     }
 }
