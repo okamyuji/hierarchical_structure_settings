@@ -7,6 +7,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 設定管理システムを初期化
     let config = ConfigManager::new("DemoApp".to_string());
+    // 表示してよい項目だけを登録する。登録しなかった値は *** で表示される。
+    for pattern in [
+        "app.*",
+        "server.host",
+        "server.port",
+        "debug.*",
+        "features.*",
+        "database.port",
+        "database.database_name",
+    ] {
+        config.allow_display(pattern);
+    }
 
     // 1. 外部設定ファイルからの読み込み
     println!("1. 外部設定ファイルからの読み込み:");
@@ -103,7 +115,7 @@ fn add_runtime_config(config: &ConfigManager) -> Result<(), String> {
 }
 
 /// 設定値の取得と使用方法のデモ
-// 設定値は資格情報入りの URL などを含み得るので、表示はマスク付きの get_display を通す。
+// 設定値の表示は get_display を通し、許可していない値を *** にする。
 fn demonstrate_config_usage(config: &ConfigManager) {
     if let Some(app_name) = config.get_display("app.name") {
         println!("アプリケーション名: {}", app_name);

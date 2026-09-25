@@ -106,143 +106,13 @@ impl ConfigNode {
     }
 }
 
-const SENSITIVE_WORDS: &[&str] = &[
-    "password",
-    "passwd",
-    "pass",
-    "passphrase",
-    "secret",
-    "token",
-    "credential",
-    "key",
-    "apikey",
-    "pat",
-    "dsn",
-    "bearer",
-    "webhook",
-    "pwd",
-    "auth",
-    "authorization",
-    "cookie",
-    "salt",
-    "jwt",
-    "pin",
-    "otp",
-    "signature",
-    "sig",
-    "private",
-];
-
-// `dbpassword` のように区切りなしで連結された名前も拾う。
-const SENSITIVE_FRAGMENTS: &[&str] = &[
-    "password",
-    "passwd",
-    "secret",
-    "credential",
-    "apikey",
-    "token",
-    "privatekey",
-    "signingkey",
-    "accesskey",
-];
-
-// 整数の値で末尾がこれらの語なら、秘密値ではなく期限、回数、ファイルの場所などとみなす。
-const NON_SECRET_LAST_WORDS: &[&str] = &["hours", "seconds", "attempts", "file", "path"];
-
-// 環境変数は `_` を `.` に変えて読み込むので、区切りを `_` に揃えて語ごとに照合する。
-fn path_words(path: &str) -> (String, Vec<String>) {
-    let normalized = split_camel_case(path).replace(['.', '-'], "_");
-    let words = normalized
-        .split('_')
-        .map(|w| w.trim_end_matches(|c: char| c.is_ascii_digit()).to_string())
-        .collect();
-    (normalized, words)
-}
-
-// 取りこぼしより隠しすぎを選ぶ。末尾の語による例外は考慮しない。
-fn mentions_secret(path: &str) -> bool {
-    let (normalized, words) = path_words(path);
-    let is_word = |w: &str| {
-        SENSITIVE_WORDS.contains(&w)
-            || w.strip_suffix('s')
-                .is_some_and(|s| SENSITIVE_WORDS.contains(&s))
-    };
-    words.iter().any(|w| is_word(w)) || SENSITIVE_FRAGMENTS.iter().any(|f| normalized.contains(f))
-}
-
-fn is_sensitive(path: &str) -> bool {
-    let (_, words) = path_words(path);
-    let allowed = words
-        .last()
-        .is_some_and(|w| NON_SECRET_LAST_WORDS.contains(&w.as_str()));
-    mentions_secret(path) && !allowed
-}
-
-// 小文字から大文字への境目と、`SSHKey` の `H|K` のような略語の終わりに `_` を入れて小文字にする。
-fn split_camel_case(path: &str) -> String {
-    let chars: Vec<char> = path.chars().collect();
-    let mut out = String::with_capacity(path.len());
-    for (i, &c) in chars.iter().enumerate() {
-        if c.is_uppercase() && i > 0 {
-            let prev = chars[i - 1];
-            let next_is_lower = chars.get(i + 1).is_some_and(|n| n.is_lowercase());
-            if prev.is_lowercase()
-                || prev.is_ascii_digit()
-                || (prev.is_uppercase() && next_is_lower)
-            {
-                out.push('_');
-            }
-        }
-        out.extend(c.to_lowercase());
-    }
-    out
-}
-
-// `Server=h;Password=X`、`?token=X`、`Password = X` のような `key=value` の key を名前と同じ規則で調べる。
-fn has_sensitive_assignment(s: &str) -> bool {
-    s.match_indices('=').any(|(i, _)| {
-        let key = s[..i]
-            .trim_end()
-            .rsplit(|c: char| matches!(c, ';' | '&' | '?' | ',') || c.is_whitespace())
-            .next()
-            .unwrap_or_default();
-        !key.is_empty() && mentions_secret(key)
-    })
-}
-
-// パスワードの無い `https://TOKEN@host` や `@` を含む不正な形も、隠す側に倒して扱う。
-fn value_has_credentials(value: &ConfigValue) -> bool {
-    match value {
-        ConfigValue::String(s) => {
-            let url_userinfo = s
-                .split_once("://")
-                .and_then(|(_, rest)| rest.rsplit_once('@'))
-                .is_some_and(|(userinfo, _)| !userinfo.is_empty());
-            url_userinfo || has_sensitive_assignment(s)
-        }
-        ConfigValue::Array(items) => items.iter().any(value_has_credentials),
-        ConfigValue::Integer(_) | ConfigValue::Boolean(_) => false,
-    }
-}
-
-// 真偽値は1ビットの情報しか持たず秘密値になり得ないので、キー名にかかわらず表示する。
-// 末尾の語による例外は整数にだけ使い、文字列は `db.password.file` のような名前でも隠す。
-fn should_mask(path: &str, value: &ConfigValue) -> bool {
-    match value {
-        ConfigValue::Boolean(_) => false,
-        ConfigValue::Integer(_) => is_sensitive(path),
-        ConfigValue::String(_) | ConfigValue::Array(_) => {
-            mentions_secret(path) || value_has_credentials(value)
-        }
-    }
-}
-
 /// 設定ツリー全体を管理する。
 ///
 /// パスの誤りなど、この型が返すエラーは `String`。ファイルを読む `ConfigLoader` は
 /// `Box<dyn Error>` を返し、`?` でこの `String` をそのまま受け取れる。
 pub struct ConfigManager {
     root: Rc<ConfigNode>,
+    display_allowlist: RefCell<Vec<String>>,
 }
 
 impl ConfigManager {
@@ -250,6 +120,7 @@ impl ConfigManager {
     pub fn new(root_name: String) -> Self {
         ConfigManager {
             root: ConfigNode::new_root(root_name),
+            display_allowlist: RefCell::new(Vec::new()),
         }
     }
 
@@ -271,13 +142,34 @@ impl ConfigManager {
         Ok(())
     }
 
-    /// 表示用の文字列を返す。`display_tree` と同じ規則で秘密値は `***` になる。
+    /// 表示を許可するパスを登録する。`server.port` はそのパスだけ、`features.*` は配下のすべてに一致する。
+    ///
+    /// 許可していないパスの値は、`display_tree` と `get_display` で `***` になる。既定では何も許可しない。
+    pub fn allow_display(&self, pattern: &str) {
+        self.display_allowlist
+            .borrow_mut()
+            .push(pattern.to_string());
+    }
+
+    fn is_display_allowed(&self, path: &str) -> bool {
+        self.display_allowlist
+            .borrow()
+            .iter()
+            .any(|pattern| match pattern.strip_suffix(".*") {
+                Some(prefix) => path
+                    .strip_prefix(prefix)
+                    .is_some_and(|rest| rest.starts_with('.')),
+                None => pattern == path,
+            })
+    }
+
+    /// 表示用の文字列を返す。許可していないパスの値は `***` になる。
     pub fn get_display(&self, path: &str) -> Option<String> {
         let value = self.get_config(path)?;
-        Some(if should_mask(path, &value) {
-            "***".to_string()
-        } else {
+        Some(if self.is_display_allowed(path) {
             value.to_string()
+        } else {
+            "***".to_string()
         })
     }
 
@@ -286,8 +178,7 @@ impl ConfigManager {
         self.root.get_value(path)
     }
 
-    /// 設定ツリーを標準出力に表示する。秘密値らしい名前、資格情報入りの URL、
-    /// `password=` のような代入を含む値は `***` で隠す。真偽値は常に表示する。
+    /// 設定ツリーを標準出力に表示する。`allow_display` で許可していないパスの値は `***` で隠す。
     pub fn display_tree(&self) {
         self.display_node(&self.root, 0, "");
     }
@@ -295,10 +186,10 @@ impl ConfigManager {
     fn display_node(&self, node: &ConfigNode, depth: usize, path: &str) {
         let indent = "  ".repeat(depth);
         match &*node.value.borrow() {
-            Some(value) if should_mask(path, value) => {
-                println!("{}{}= ***", indent, node.name())
+            Some(value) if self.is_display_allowed(path) => {
+                println!("{}{}= {}", indent, node.name(), value)
             }
-            Some(value) => println!("{}{}= {}", indent, node.name(), value),
+            Some(_) => println!("{}{}= ***", indent, node.name()),
             None => println!("{}{}/", indent, node.name()),
         }
 
@@ -433,152 +324,33 @@ mod tests {
     }
 
     #[test]
-    fn is_sensitive_matches_full_path_case_insensitively() {
-        for path in [
-            "database.password",
-            "Auth.Password",
-            "storage.s3.secret.key",
-            "api.key",
-            "api.token",
-            "aws.access_key",
-            "slack.webhook_url",
-            "my.passwd",
-            "private.key",
-            "auth.credentials",
-            "apikey",
-            "notifications.webhook.url",
-            "db.password.hash",
-            "db.password.enc",
-            "secret.arn",
-            "auth.token.value",
-            "password.plain",
-            "api.key.id",
-            "client.secret.value",
-            "private.key.pem",
-            "credentials.json",
-            "token.1",
-            "refresh.tokens",
-            "password2",
-            "dbpassword",
-            "session_key",
-            "encryption_key",
-            "jwt_signing_key",
-            "smtp_pass",
-            "passphrase",
-            "sentry.dsn",
-            "github_pat",
-            "slack_webhook",
-            "auth_bearer",
-            "api-key",
-            "accesstoken",
-            "authToken",
-            "privateKey",
-            "signingkey",
-            "accesskey",
-            "auth.header",
-            "authorization.header",
-            "db.pwd",
-            "auth",
-            "session.cookie",
-            "hash.salt",
-            "authHeader",
-            "authorizationHeader",
-            "sessionCookie",
-            "userPwd",
-            "clientAuth",
-            "saltValue",
-            "SSHKey",
-            "userPWD",
-            "HMACKey",
-            "DBPass",
-            "SMTPPwd",
-            "SMTPAuth",
-            "auth.jwt",
-            "atm.pin",
-            "mfa.otp",
-            "request.signature",
-            "url.sig",
-            "private",
-            "features.password_reset",
-            "api.key.enabled",
-            "api.auth.api_key_header",
-        ] {
-            assert!(is_sensitive(path), "{path}");
+    fn allow_display_matches_exact_paths_and_wildcard_subtrees() {
+        let config = ConfigManager::new("app".to_string());
+        config.allow_display("server.port");
+        config.allow_display("features.*");
+        for path in ["server.port", "features.a", "features.a.b"] {
+            assert!(config.is_display_allowed(path), "{path}");
         }
         for path in [
-            "database.host",
-            "server.port",
-            "security.token_expiry_hours",
-            "server.tls.key_file",
-            "api.base_path",
-            "cache.ttl_seconds",
-            "notifications.webhook.retry_attempts",
+            "server.host",
+            "server.port.x",
+            "server",
+            "features",
+            "featuresx.a",
+            "serverx.port",
             "",
         ] {
-            assert!(!is_sensitive(path), "{path}");
+            assert!(!config.is_display_allowed(path), "{path}");
         }
     }
 
     #[test]
-    fn value_has_credentials_detects_userinfo_with_password() {
-        let s = |v: &str| ConfigValue::String(v.to_string());
-        assert!(value_has_credentials(&s("postgres://user:pw@db:5432/app")));
-        assert!(value_has_credentials(&s("https://u:p@example.com")));
-        assert!(value_has_credentials(&s("https://ghp_token@github.com")));
-        assert!(value_has_credentials(&s("http://u@x:PW@h")));
-        assert!(value_has_credentials(&s("http://u:p/PW@h")));
-        assert!(value_has_credentials(&ConfigValue::Array(vec![
-            s("https://example.com"),
-            s("https://u:PW@h"),
-        ])));
-        assert!(!value_has_credentials(&ConfigValue::Array(vec![s(
-            "https://example.com"
-        )])));
-        assert!(!value_has_credentials(&s("https://example.com/path")));
-        assert!(!value_has_credentials(&s("https://@example.com")));
-        assert!(!value_has_credentials(&s("user:pw@host")));
-        assert!(!value_has_credentials(&ConfigValue::Integer(1)));
-    }
-
-    #[test]
-    fn should_mask_ignores_booleans_and_checks_connection_strings() {
-        let s = |v: &str| ConfigValue::String(v.to_string());
-        assert!(!should_mask(
-            "features.password_reset",
-            &ConfigValue::Boolean(true)
-        ));
-        assert!(!should_mask(
-            "api.key.enabled",
-            &ConfigValue::Boolean(false)
-        ));
-        assert!(should_mask("features.password_reset", &s("x")));
-        assert!(should_mask("db.connection", &s("Server=h;Password=X")));
-        assert!(should_mask("db.connection", &s("server=h;PWD=X")));
-        assert!(!should_mask("db.connection", &s("Server=h;Database=app")));
-        assert!(should_mask(
-            "db.replicas",
-            &ConfigValue::Array(vec![s("Server=a"), s("Server=b;Password=X")])
-        ));
-        assert!(should_mask("db.password", &ConfigValue::Integer(1)));
-        for value in [
-            "Server=h;Passwd=S2",
-            "a=1&secret=S3",
-            "Server=h; Password = S4",
-            "DefaultEndpointsProtocol=https;AccountKey=S5",
-            "https://h/p?token=S6",
-            "https://h/p?x=1&sig=S7",
-            "user=a password=b",
-        ] {
-            assert!(should_mask("db.connection", &s(value)), "{value}");
-        }
-        assert!(!should_mask("db.connection", &s("a=1&b=2")));
-        assert!(!should_mask("db.connection", &s("=x")));
-        assert!(should_mask("db.password_hours", &s("V")));
-        assert!(should_mask("db.password.file", &s("/run/secrets/pw")));
-        assert!(!should_mask(
-            "security.token_expiry_hours",
-            &ConfigValue::Integer(24)
-        ));
+    fn nothing_is_displayed_until_allowed() {
+        let config = ConfigManager::new("app".to_string());
+        config
+            .set_config("flag", ConfigValue::Boolean(true))
+            .unwrap();
+        assert_eq!(config.get_display("flag"), Some("***".to_string()));
     }
 
     #[test]
@@ -593,22 +365,16 @@ mod tests {
     }
 
     #[test]
-    fn get_display_masks_secrets_and_formats_values() {
+    fn get_display_shows_only_allowed_values() {
         let config = ConfigManager::new("app".to_string());
         config
             .set_config("db.password", ConfigValue::String("pw".to_string()))
             .unwrap();
         config
-            .set_config(
-                "db.host",
-                ConfigValue::String("postgres://u:p@h".to_string()),
-            )
-            .unwrap();
-        config
             .set_config("db.port", ConfigValue::Integer(5432))
             .unwrap();
+        config.allow_display("db.port");
         assert_eq!(config.get_display("db.password"), Some("***".to_string()));
-        assert_eq!(config.get_display("db.host"), Some("***".to_string()));
         assert_eq!(config.get_display("db.port"), Some("5432".to_string()));
         assert_eq!(config.get_display("db.missing"), None);
     }

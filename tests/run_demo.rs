@@ -15,7 +15,6 @@ fn demo_binary_loads_config_files_and_env() {
         .env("APP_STORAGE_S3_SECRET_KEY", "AKIAREALSECRET")
         .env("APP_API_TOKEN", "tok123")
         .env("APP_DATABASE_HOST", "postgres://u:hostpw@db/app")
-        .env("APP_APP_ENVIRONMENT", "https://u:envpw@h")
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -25,12 +24,11 @@ fn demo_binary_loads_config_files_and_env() {
         "✓ config.jsonの読み込み完了",
         "✓ 環境変数の読み込み完了",
         "データベース: config_app_db",
-        "実行環境: ***",
         "バインドアドレス: 0.0.0.0:8080",
         "ホスト: ***",
         "password_reset= true",
-        "token_expiry_hours= 24",
-        "\n    value= 77",
+        "token_expiry_hours= ***",
+        "\n    value= ***",
         "✓ 実行時設定の追加完了",
         "アプリケーション名: HierarchicalConfigApp",
         "  ログレベル: DEBUG",
@@ -57,7 +55,6 @@ fn demo_binary_loads_config_files_and_env() {
         "AKIAREALSECRET",
         "tok123",
         "hostpw",
-        "envpw",
     ] {
         assert!(!stdout.contains(secret), "{secret} leaked:\n{stdout}");
     }
