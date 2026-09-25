@@ -103,16 +103,16 @@ fn add_runtime_config(config: &ConfigManager) -> Result<(), String> {
 }
 
 /// 設定値の取得と使用方法のデモ
+// 設定値は資格情報入りの URL などを含み得るので、表示はマスク付きの get_display を通す。
 fn demonstrate_config_usage(config: &ConfigManager) {
     if let Some(app_name) = config.get_display("app.name") {
         println!("アプリケーション名: {}", app_name);
     }
 
-    if let Some(ConfigValue::String(env)) = config.get_config("app.environment") {
+    if let Some(env) = config.get_display("app.environment") {
         println!("実行環境: {}", env);
     }
 
-    // 接続情報は資格情報入りの URL を含み得るので、マスク付きの get_display で表示する。
     println!("\nデータベース接続情報:");
     for (label, path) in [
         ("ホスト", "database.host"),
@@ -125,9 +125,9 @@ fn demonstrate_config_usage(config: &ConfigManager) {
         println!("  {}: {}", label, shown);
     }
 
-    if let (Some(ConfigValue::String(host)), Some(ConfigValue::Integer(port))) = (
-        config.get_config("server.host"),
-        config.get_config("server.port"),
+    if let (Some(host), Some(port)) = (
+        config.get_display("server.host"),
+        config.get_display("server.port"),
     ) {
         println!("\nサーバー設定:");
         println!("  バインドアドレス: {}:{}", host, port);
@@ -139,9 +139,7 @@ fn demonstrate_config_usage(config: &ConfigManager) {
             if debug_enabled { "有効" } else { "無効" }
         );
 
-        if debug_enabled
-            && let Some(ConfigValue::String(log_level)) = config.get_config("debug.log_level")
-        {
+        if debug_enabled && let Some(log_level) = config.get_display("debug.log_level") {
             println!("  ログレベル: {}", log_level);
         }
     }

@@ -136,11 +136,11 @@ export MYAPP_DEBUG_ENABLED=true
 
 `display_tree`は設定ツリー全体を標準出力に表示する関数です。1つの値だけを表示したい場合は、同じ規則で秘密値を隠す`get_display`が使えます。どちらの関数でも、パスワードやトークンのような秘密値は`***`に置き換えて表示する仕組みです。
 
-秘密値かどうかの判定には、設定のフルパスを小文字にし、`.`と`-`を`_`に置き換えた文字列を使います。この文字列を`_`で語に分け、`password`、`pass`、`pwd`、`secret`、`token`、`credential`、`key`、`auth`、`authorization`、`cookie`、`salt`、`pat`、`dsn`、`bearer`、`webhook`などと一致する語があれば隠す対象です。語の末尾の数字と複数形の`s`は取り除いてから比べるので、`password2`や`refresh_tokens`も隠れます。`accessToken`や`dbpassword`のように区切りなしでつながった名前は、`token`や`password`などの語を部分一致でも探して拾います。値の型は問いません。
+秘密値かどうかの判定には、設定のフルパスを加工した文字列を使います。`accessToken`のような小文字から大文字への境目に`_`を入れてから小文字にし、`.`と`-`も`_`に置き換えます。この文字列を`_`で語に分け、`password`、`pass`、`pwd`、`secret`、`token`、`credential`、`key`、`auth`、`authorization`、`cookie`、`salt`、`pat`、`dsn`、`bearer`、`webhook`などと一致する語があれば隠す対象です。語の末尾の数字と複数形の`s`は取り除いてから比べるので、`password2`や`refresh_tokens`も隠れます。`accessToken`や`dbpassword`のように区切りなしでつながった名前は、`token`や`password`などの語を部分一致でも探して拾います。値の型は問いません。
 
-値の側も確認しています。`postgres://user:pw@host/db`や`https://TOKEN@github.com`のように、`://`の後ろに空でないユーザー情報を持つURLは、キー名にかかわらず隠れます。配列の中にこの形のURLが1つでもあれば、配列全体が隠れる仕組みです。
+値の側も確認しています。`postgres://user:pw@host/db`や`https://TOKEN@github.com`のように、`://`より後ろに`@`があり、その前が空でない文字列は、キー名にかかわらず隠れます。この判定はパスやクエリの中の`@`にも反応するので、`https://cdn.example.com/user@2x.png`のようなURLも隠す対象です。`Server=h;Password=X`のように`password=`や`pwd=`を含む接続文字列も同じ扱いになります。配列の中にこうした値が1つでもあれば、配列全体が隠れる仕組みです。
 
-判定は取りこぼしより隠しすぎを選ぶ方針です。ただし、最後の語が`hours`、`seconds`、`attempts`、`reset`、`file`、`path`、`enabled`のどれかであれば、期限や回数、フラグ、ファイルの場所を表すキーとみなして隠しません。そのため`token_expiry_hours`や`password_reset`はそのまま表示されます。
+判定は取りこぼしより隠しすぎを選ぶ方針です。ただし、最後の語が`hours`、`seconds`、`attempts`、`file`、`path`のどれかであれば、期限や回数、ファイルの場所を表すキーとみなして隠しません。真偽値は1ビットの情報しか持たず秘密値になり得ないため、キー名にかかわらず表示します。そのため`token_expiry_hours = 24`や`password_reset = true`はそのまま表示される一方、`password_reset`に文字列が入っていれば隠れます。
 
 このマスクは名前と値の形に頼る補助的な仕組みで、すべての秘密値を確実に見分けられるわけではありません。たとえば全角文字で書かれたキー名は判定をすり抜けます。秘密値を含む設定ツリーを、本番環境のログへ出力しないでください。
 

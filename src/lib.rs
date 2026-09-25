@@ -19,6 +19,20 @@ pub enum ConfigValue {
     Array(Vec<ConfigValue>),
 }
 
+impl std::fmt::Display for ConfigValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConfigValue::String(s) => write!(f, "{s}"),
+            ConfigValue::Integer(i) => write!(f, "{i}"),
+            ConfigValue::Boolean(b) => write!(f, "{b}"),
+            ConfigValue::Array(items) => {
+                let items: Vec<String> = items.iter().map(ToString::to_string).collect();
+                write!(f, "[{}]", items.join(", "))
+            }
+        }
+    }
+}
+
 /// 設定ツリーのノード。子は名前順に保持し、親は `Weak` で参照して循環参照を避ける。
 #[derive(Debug)]
 pub struct ConfigNode {
@@ -127,13 +141,11 @@ const SENSITIVE_FRAGMENTS: &[&str] = &[
 ];
 
 // 末尾がこれらの語なら秘密値そのものではない（期限、フラグ、ファイルの場所など）。
-const NON_SECRET_LAST_WORDS: &[&str] = &[
-    "hours", "seconds", "attempts", "reset", "file", "path", "enabled",
-];
+const NON_SECRET_LAST_WORDS: &[&str] = &["hours", "seconds", "attempts", "file", "path"];
 
 // 取りこぼしより隠しすぎを選ぶ。環境変数は `_` を `.` に変えて読み込むので、区切りを `_` に揃えて語ごとに照合する。
 fn is_sensitive(path: &str) -> bool {
-    let normalized = path.to_lowercase().replace(['.', '-'], "_");
+    let normalized = split_camel_case(path).replace(['.', '-'], "_");
     let words: Vec<&str> = normalized
         .split('_')
         .map(|w| w.trim_end_matches(|c: char| c.is_ascii_digit()))
@@ -152,20 +164,41 @@ fn is_sensitive(path: &str) -> bool {
     words.iter().any(|w| is_word(w)) || SENSITIVE_FRAGMENTS.iter().any(|f| normalized.contains(f))
 }
 
+// `accessToken` を `access_token` として語に分けられるよう、小文字から大文字への境目に `_` を入れて小文字にする。
+fn split_camel_case(path: &str) -> String {
+    let mut out = String::with_capacity(path.len());
+    let mut prev_lower = false;
+    for c in path.chars() {
+        if c.is_uppercase() && prev_lower {
+            out.push('_');
+        }
+        prev_lower = c.is_lowercase() || c.is_ascii_digit();
+        out.extend(c.to_lowercase());
+    }
+    out
+}
+
 // パスワードの無い `https://TOKEN@host` や `@` を含む不正な形も、隠す側に倒して扱う。
-fn has_url_credentials(value: &ConfigValue) -> bool {
+// `Server=h;Password=X` のような接続文字列も対象にする。
+fn value_has_credentials(value: &ConfigValue) -> bool {
     match value {
-        ConfigValue::String(s) => s
-            .split_once("://")
-            .and_then(|(_, rest)| rest.rsplit_once('@'))
-            .is_some_and(|(userinfo, _)| !userinfo.is_empty()),
-        ConfigValue::Array(items) => items.iter().any(has_url_credentials),
+        ConfigValue::String(s) => {
+            let lower = s.to_lowercase();
+            let url_userinfo = s
+                .split_once("://")
+                .and_then(|(_, rest)| rest.rsplit_once('@'))
+                .is_some_and(|(userinfo, _)| !userinfo.is_empty());
+            url_userinfo || lower.contains("password=") || lower.contains("pwd=")
+        }
+        ConfigValue::Array(items) => items.iter().any(value_has_credentials),
         _ => false,
     }
 }
 
+// 真偽値は1ビットの情報しか持たず秘密値になり得ないので、キー名にかかわらず表示する。
 fn should_mask(path: &str, value: &ConfigValue) -> bool {
-    is_sensitive(path) || has_url_credentials(value)
+    !matches!(value, ConfigValue::Boolean(_))
+        && (is_sensitive(path) || value_has_credentials(value))
 }
 
 /// 設定ツリー全体を管理する。
@@ -208,7 +241,7 @@ impl ConfigManager {
         Some(if should_mask(path, &value) {
             "***".to_string()
         } else {
-            format!("{value:?}")
+            value.to_string()
         })
     }
 
@@ -411,6 +444,14 @@ mod tests {
             "auth",
             "session.cookie",
             "hash.salt",
+            "authHeader",
+            "authorizationHeader",
+            "sessionCookie",
+            "userPwd",
+            "clientAuth",
+            "saltValue",
+            "features.password_reset",
+            "api.key.enabled",
             "api.auth.api_key_header",
         ] {
             assert!(is_sensitive(path), "{path}");
@@ -419,7 +460,6 @@ mod tests {
             "database.host",
             "server.port",
             "security.token_expiry_hours",
-            "features.password_reset",
             "server.tls.key_file",
             "api.base_path",
             "cache.ttl_seconds",
@@ -431,24 +471,57 @@ mod tests {
     }
 
     #[test]
-    fn has_url_credentials_detects_userinfo_with_password() {
+    fn value_has_credentials_detects_userinfo_with_password() {
         let s = |v: &str| ConfigValue::String(v.to_string());
-        assert!(has_url_credentials(&s("postgres://user:pw@db:5432/app")));
-        assert!(has_url_credentials(&s("https://u:p@example.com")));
-        assert!(has_url_credentials(&s("https://ghp_token@github.com")));
-        assert!(has_url_credentials(&s("http://u@x:PW@h")));
-        assert!(has_url_credentials(&s("http://u:p/PW@h")));
-        assert!(has_url_credentials(&ConfigValue::Array(vec![
+        assert!(value_has_credentials(&s("postgres://user:pw@db:5432/app")));
+        assert!(value_has_credentials(&s("https://u:p@example.com")));
+        assert!(value_has_credentials(&s("https://ghp_token@github.com")));
+        assert!(value_has_credentials(&s("http://u@x:PW@h")));
+        assert!(value_has_credentials(&s("http://u:p/PW@h")));
+        assert!(value_has_credentials(&ConfigValue::Array(vec![
             s("https://example.com"),
             s("https://u:PW@h"),
         ])));
-        assert!(!has_url_credentials(&ConfigValue::Array(vec![s(
+        assert!(!value_has_credentials(&ConfigValue::Array(vec![s(
             "https://example.com"
         )])));
-        assert!(!has_url_credentials(&s("https://example.com/path")));
-        assert!(!has_url_credentials(&s("https://@example.com")));
-        assert!(!has_url_credentials(&s("user:pw@host")));
-        assert!(!has_url_credentials(&ConfigValue::Integer(1)));
+        assert!(!value_has_credentials(&s("https://example.com/path")));
+        assert!(!value_has_credentials(&s("https://@example.com")));
+        assert!(!value_has_credentials(&s("user:pw@host")));
+        assert!(!value_has_credentials(&ConfigValue::Integer(1)));
+    }
+
+    #[test]
+    fn should_mask_ignores_booleans_and_checks_connection_strings() {
+        let s = |v: &str| ConfigValue::String(v.to_string());
+        assert!(!should_mask(
+            "features.password_reset",
+            &ConfigValue::Boolean(true)
+        ));
+        assert!(!should_mask(
+            "api.key.enabled",
+            &ConfigValue::Boolean(false)
+        ));
+        assert!(should_mask("features.password_reset", &s("x")));
+        assert!(should_mask("db.connection", &s("Server=h;Password=X")));
+        assert!(should_mask("db.connection", &s("server=h;PWD=X")));
+        assert!(!should_mask("db.connection", &s("Server=h;Database=app")));
+        assert!(should_mask(
+            "db.replicas",
+            &ConfigValue::Array(vec![s("Server=a"), s("Server=b;Password=X")])
+        ));
+        assert!(should_mask("db.password", &ConfigValue::Integer(1)));
+    }
+
+    #[test]
+    fn config_value_display_shows_plain_values() {
+        let value = ConfigValue::Array(vec![
+            ConfigValue::String("a".to_string()),
+            ConfigValue::Integer(1),
+            ConfigValue::Boolean(true),
+            ConfigValue::Array(vec![]),
+        ]);
+        assert_eq!(value.to_string(), "[a, 1, true, []]");
     }
 
     #[test]
@@ -468,10 +541,7 @@ mod tests {
             .unwrap();
         assert_eq!(config.get_display("db.password"), Some("***".to_string()));
         assert_eq!(config.get_display("db.host"), Some("***".to_string()));
-        assert_eq!(
-            config.get_display("db.port"),
-            Some("Integer(5432)".to_string())
-        );
+        assert_eq!(config.get_display("db.port"), Some("5432".to_string()));
         assert_eq!(config.get_display("db.missing"), None);
     }
 
