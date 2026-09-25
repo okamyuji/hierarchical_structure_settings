@@ -125,6 +125,12 @@ const SENSITIVE_WORDS: &[&str] = &[
     "authorization",
     "cookie",
     "salt",
+    "jwt",
+    "pin",
+    "otp",
+    "signature",
+    "sig",
+    "private",
 ];
 
 // `dbpassword` のように区切りなしで連結された名前も拾う。
@@ -140,22 +146,22 @@ const SENSITIVE_FRAGMENTS: &[&str] = &[
     "accesskey",
 ];
 
-// 末尾がこれらの語なら秘密値そのものではない（期限、フラグ、ファイルの場所など）。
+// 整数の値で末尾がこれらの語なら、秘密値ではなく期限、回数、ファイルの場所などとみなす。
 const NON_SECRET_LAST_WORDS: &[&str] = &["hours", "seconds", "attempts", "file", "path"];
 
-// 取りこぼしより隠しすぎを選ぶ。環境変数は `_` を `.` に変えて読み込むので、区切りを `_` に揃えて語ごとに照合する。
-fn is_sensitive(path: &str) -> bool {
+// 環境変数は `_` を `.` に変えて読み込むので、区切りを `_` に揃えて語ごとに照合する。
+fn path_words(path: &str) -> (String, Vec<String>) {
     let normalized = split_camel_case(path).replace(['.', '-'], "_");
-    let words: Vec<&str> = normalized
+    let words = normalized
         .split('_')
-        .map(|w| w.trim_end_matches(|c: char| c.is_ascii_digit()))
+        .map(|w| w.trim_end_matches(|c: char| c.is_ascii_digit()).to_string())
         .collect();
-    if words
-        .last()
-        .is_some_and(|w| NON_SECRET_LAST_WORDS.contains(w))
-    {
-        return false;
-    }
+    (normalized, words)
+}
+
+// 取りこぼしより隠しすぎを選ぶ。末尾の語による例外は考慮しない。
+fn mentions_secret(path: &str) -> bool {
+    let (normalized, words) = path_words(path);
     let is_word = |w: &str| {
         SENSITIVE_WORDS.contains(&w)
             || w.strip_suffix('s')
@@ -164,41 +170,71 @@ fn is_sensitive(path: &str) -> bool {
     words.iter().any(|w| is_word(w)) || SENSITIVE_FRAGMENTS.iter().any(|f| normalized.contains(f))
 }
 
-// `accessToken` を `access_token` として語に分けられるよう、小文字から大文字への境目に `_` を入れて小文字にする。
+fn is_sensitive(path: &str) -> bool {
+    let (_, words) = path_words(path);
+    let allowed = words
+        .last()
+        .is_some_and(|w| NON_SECRET_LAST_WORDS.contains(&w.as_str()));
+    mentions_secret(path) && !allowed
+}
+
+// 小文字から大文字への境目と、`SSHKey` の `H|K` のような略語の終わりに `_` を入れて小文字にする。
 fn split_camel_case(path: &str) -> String {
+    let chars: Vec<char> = path.chars().collect();
     let mut out = String::with_capacity(path.len());
-    let mut prev_lower = false;
-    for c in path.chars() {
-        if c.is_uppercase() && prev_lower {
-            out.push('_');
+    for (i, &c) in chars.iter().enumerate() {
+        if c.is_uppercase() && i > 0 {
+            let prev = chars[i - 1];
+            let next_is_lower = chars.get(i + 1).is_some_and(|n| n.is_lowercase());
+            if prev.is_lowercase()
+                || prev.is_ascii_digit()
+                || (prev.is_uppercase() && next_is_lower)
+            {
+                out.push('_');
+            }
         }
-        prev_lower = c.is_lowercase() || c.is_ascii_digit();
         out.extend(c.to_lowercase());
     }
     out
 }
 
+// `Server=h;Password=X`、`?token=X`、`Password = X` のような `key=value` の key を名前と同じ規則で調べる。
+fn has_sensitive_assignment(s: &str) -> bool {
+    s.match_indices('=').any(|(i, _)| {
+        let key = s[..i]
+            .trim_end()
+            .rsplit(|c: char| matches!(c, ';' | '&' | '?' | ',') || c.is_whitespace())
+            .next()
+            .unwrap_or_default();
+        !key.is_empty() && mentions_secret(key)
+    })
+}
+
 // パスワードの無い `https://TOKEN@host` や `@` を含む不正な形も、隠す側に倒して扱う。
-// `Server=h;Password=X` のような接続文字列も対象にする。
 fn value_has_credentials(value: &ConfigValue) -> bool {
     match value {
         ConfigValue::String(s) => {
-            let lower = s.to_lowercase();
             let url_userinfo = s
                 .split_once("://")
                 .and_then(|(_, rest)| rest.rsplit_once('@'))
                 .is_some_and(|(userinfo, _)| !userinfo.is_empty());
-            url_userinfo || lower.contains("password=") || lower.contains("pwd=")
+            url_userinfo || has_sensitive_assignment(s)
         }
         ConfigValue::Array(items) => items.iter().any(value_has_credentials),
-        _ => false,
+        ConfigValue::Integer(_) | ConfigValue::Boolean(_) => false,
     }
 }
 
 // 真偽値は1ビットの情報しか持たず秘密値になり得ないので、キー名にかかわらず表示する。
+// 末尾の語による例外は整数にだけ使い、文字列は `db.password.file` のような名前でも隠す。
 fn should_mask(path: &str, value: &ConfigValue) -> bool {
-    !matches!(value, ConfigValue::Boolean(_))
-        && (is_sensitive(path) || value_has_credentials(value))
+    match value {
+        ConfigValue::Boolean(_) => false,
+        ConfigValue::Integer(_) => is_sensitive(path),
+        ConfigValue::String(_) | ConfigValue::Array(_) => {
+            mentions_secret(path) || value_has_credentials(value)
+        }
+    }
 }
 
 /// 設定ツリー全体を管理する。
@@ -250,7 +286,8 @@ impl ConfigManager {
         self.root.get_value(path)
     }
 
-    /// 設定ツリーを標準出力に表示する。秘密値らしいパスと資格情報入りの URL は `***` で隠す。
+    /// 設定ツリーを標準出力に表示する。秘密値らしい名前、資格情報入りの URL、
+    /// `password=` のような代入を含む値は `***` で隠す。真偽値は常に表示する。
     pub fn display_tree(&self) {
         self.display_node(&self.root, 0, "");
     }
@@ -261,7 +298,7 @@ impl ConfigManager {
             Some(value) if should_mask(path, value) => {
                 println!("{}{}= ***", indent, node.name())
             }
-            Some(value) => println!("{}{}= {:?}", indent, node.name(), value),
+            Some(value) => println!("{}{}= {}", indent, node.name(), value),
             None => println!("{}{}/", indent, node.name()),
         }
 
@@ -450,6 +487,18 @@ mod tests {
             "userPwd",
             "clientAuth",
             "saltValue",
+            "SSHKey",
+            "userPWD",
+            "HMACKey",
+            "DBPass",
+            "SMTPPwd",
+            "SMTPAuth",
+            "auth.jwt",
+            "atm.pin",
+            "mfa.otp",
+            "request.signature",
+            "url.sig",
+            "private",
             "features.password_reset",
             "api.key.enabled",
             "api.auth.api_key_header",
@@ -511,6 +560,25 @@ mod tests {
             &ConfigValue::Array(vec![s("Server=a"), s("Server=b;Password=X")])
         ));
         assert!(should_mask("db.password", &ConfigValue::Integer(1)));
+        for value in [
+            "Server=h;Passwd=S2",
+            "a=1&secret=S3",
+            "Server=h; Password = S4",
+            "DefaultEndpointsProtocol=https;AccountKey=S5",
+            "https://h/p?token=S6",
+            "https://h/p?x=1&sig=S7",
+            "user=a password=b",
+        ] {
+            assert!(should_mask("db.connection", &s(value)), "{value}");
+        }
+        assert!(!should_mask("db.connection", &s("a=1&b=2")));
+        assert!(!should_mask("db.connection", &s("=x")));
+        assert!(should_mask("db.password_hours", &s("V")));
+        assert!(should_mask("db.password.file", &s("/run/secrets/pw")));
+        assert!(!should_mask(
+            "security.token_expiry_hours",
+            &ConfigValue::Integer(24)
+        ));
     }
 
     #[test]

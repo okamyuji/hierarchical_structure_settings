@@ -35,7 +35,7 @@ impl ConfigLoader {
         let path = path.as_ref();
         let content = Self::read_file(path)?;
         let toml_value: toml::Value =
-            toml::from_str(&content).map_err(|e| format!("{}: {e}", path.display()))?;
+            toml::from_str(&content).map_err(|e| Self::toml_error(path, &content, &e))?;
 
         Self::load_toml_value(config_manager, &toml_value, String::new())
             .map_err(|e| format!("{}: {e}", path.display()))?;
@@ -173,6 +173,27 @@ impl ConfigLoader {
         }
 
         warnings
+    }
+
+    // toml のエラー表示は該当行をそのまま含み、秘密値が漏れ得るので、位置と説明だけを返す。
+    fn toml_error(path: &Path, content: &str, error: &toml::de::Error) -> String {
+        let (line, column) = error.span().map_or((0, 0), |span| {
+            let before = &content[..span.start];
+            let line = before.matches('\n').count() + 1;
+            let column = before
+                .rsplit('\n')
+                .next()
+                .unwrap_or_default()
+                .chars()
+                .count()
+                + 1;
+            (line, column)
+        });
+        format!(
+            "{}: TOML parse error at line {line}, column {column}: {}",
+            path.display(),
+            error.message()
+        )
     }
 
     fn read_file(path: &Path) -> Result<String, String> {
@@ -401,6 +422,18 @@ mod tests {
                 ConfigValue::Array(vec![]),
             ]))
         );
+    }
+
+    #[test]
+    fn toml_syntax_error_does_not_echo_the_line() {
+        let config = ConfigManager::new("t".to_string());
+        let toml = write_temp("leak.toml", "a = 1\npassword = \"TOPSECRET\n");
+        let message = ConfigLoader::load_from_toml(&config, &toml)
+            .unwrap_err()
+            .to_string();
+        assert!(!message.contains("TOPSECRET"), "{message}");
+        assert!(message.contains("leak.toml"), "{message}");
+        assert!(message.contains("line 2, column 22:"), "{message}");
     }
 
     #[test]
