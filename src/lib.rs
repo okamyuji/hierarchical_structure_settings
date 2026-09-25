@@ -75,8 +75,12 @@ impl ConfigNode {
     }
 }
 
-const SENSITIVE_KEYS: [&str; 6] = [
+const SENSITIVE_KEYS: [&str; 10] = [
     "password",
+    "passwd",
+    "credential",
+    "private_key",
+    "apikey",
     "secret",
     "token",
     "api_key",
@@ -288,6 +292,10 @@ mod tests {
             "api.token",
             "aws.access_key",
             "slack.webhook_url",
+            "my.passwd",
+            "private.key",
+            "auth.credentials",
+            "apikey",
         ] {
             assert!(is_sensitive(path), "{path}");
         }
