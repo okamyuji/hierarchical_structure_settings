@@ -118,7 +118,7 @@ fn demonstrate_config_usage(config: &ConfigManager) {
     // データベース接続情報の取得
     let db_host = config.get_config("database.host");
     let db_port = config.get_config("database.port");
-    let db_name = config.get_config("database.name");
+    let db_name = config.get_config("database.database_name");
 
     println!("\nデータベース接続情報:");
     println!("  ホスト: {:?}", db_host);

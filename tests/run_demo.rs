@@ -2,7 +2,12 @@ use std::process::Command;
 
 #[test]
 fn demo_binary_loads_config_files_and_env() {
-    let output = Command::new(env!("CARGO_BIN_EXE_hierarchical_structure_settings"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_hierarchical_structure_settings"));
+    // env_clear() だとカバレッジ計測用の変数まで消えるので、デモが読む APP* だけを外す。
+    for (key, _) in std::env::vars().filter(|(k, _)| k.starts_with("APP")) {
+        command.env_remove(key);
+    }
+    let output = command
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .env("APP_DEMOCHECK_VALUE", "77")
         .env("APPX_LEAK", "1")
@@ -17,6 +22,9 @@ fn demo_binary_loads_config_files_and_env() {
         "✓ config.tomlの読み込み完了",
         "✓ config.jsonの読み込み完了",
         "✓ 環境変数の読み込み完了",
+        "データベース: Some(String(\"config_app_db\"))",
+        "password_reset= Boolean(true)",
+        "token_expiry_hours= Integer(24)",
         "\n    value= Integer(77)",
         "✓ 実行時設定の追加完了",
         "アプリケーション名: String(\"HierarchicalConfigApp\")",

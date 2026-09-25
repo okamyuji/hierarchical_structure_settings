@@ -130,6 +130,16 @@ export MYAPP_DATABASE_PORT=5433
 export MYAPP_DEBUG_ENABLED=true
 ```
 
+`load_from_env`は、渡された接頭辞の末尾に`_`を補ってから変数名と照合します。`MYAPP`と`MYAPP_`のどちらを渡しても結果は同じです。`MYAPPX_HOST`のように接頭辞の直後が`_`でない変数は読み込みません。変数名の中の`_`は階層の区切りとして扱われるので、`MYAPP_DATABASE_HOST`の値は`database.host`に入ります。
+
+## 設定値の表示と秘密値の扱い
+
+`display_tree`は設定ツリー全体を標準出力に表示する関数です。パスワードやトークンのような秘密値については、値の代わりに`***`を表示します。
+
+秘密値かどうかの判定には、設定のフルパスを小文字にし、`.`を`_`に置き換えた文字列の末尾を使います。末尾が`password`、`passwd`、`secret`、`secret_key`、`token`、`credential`、`credentials`、`private_key`、`api_key`、`apikey`、`access_key`、`webhook_url`のいずれかであれば、値の型によらず隠す対象です。`token_expiry_hours`や`password_reset`のように語が途中に現れるだけのキーは隠しません。Webhookの送信先URLはトークンを含むことが多いので、`notifications.webhook.url`も隠す対象に含めてあります。
+
+同梱の`config.toml`と`config.json`では、秘密値の欄に`CHANGE_ME`という仮の値を入れてあります。実際の値は環境変数で渡すか、`.gitignore`で除外される`config.production.toml`などのファイルに書いてください。
+
 ## 設定項目一覧
 
 ### アプリケーション設定
@@ -196,7 +206,7 @@ toml = "1.1"
 uuid = { version = "1.26", features = ["v4"] }
 ```
 
-このクレートはRust edition 2024でビルドします。
+このクレートはRust edition 2024でビルドするため、Rust 1.88以上が必要です。
 
 ## テスト
 
@@ -206,7 +216,7 @@ cargo test
 
 ## ライセンス
 
-MIT License
+このクレートはMIT Licenseで公開しています。全文は[LICENSE](LICENSE)にあります。
 
 ## 貢献
 

@@ -75,23 +75,26 @@ impl ConfigNode {
     }
 }
 
-const SENSITIVE_KEYS: [&str; 10] = [
+const SENSITIVE_SUFFIXES: [&str; 12] = [
     "password",
     "passwd",
-    "credential",
-    "private_key",
-    "apikey",
     "secret",
+    "secret_key",
     "token",
+    "credential",
+    "credentials",
+    "private_key",
     "api_key",
+    "apikey",
     "access_key",
     "webhook_url",
 ];
 
-// 環境変数は `_` を `.` に変えて読み込むので、区切りを揃えたフルパスで照合する。
+// 環境変数は `_` を `.` に変えて読み込むので、区切りを `_` に揃えたフルパスの末尾で照合する。
+// 部分一致にすると token_expiry_hours や password_reset まで隠してしまう。
 fn is_sensitive(path: &str) -> bool {
     let path = path.to_lowercase().replace('.', "_");
-    SENSITIVE_KEYS.iter().any(|k| path.contains(k))
+    SENSITIVE_SUFFIXES.iter().any(|s| path.ends_with(s))
 }
 
 // 設定管理システムのメイン構造体
@@ -119,8 +122,15 @@ impl ConfigManager {
         value: ConfigValue,
     ) -> Result<(), String> {
         if path.len() == 1 {
-            // 最終ノードに到達
-            let _child = node.add_child(path[0].to_string(), Some(value));
+            let existing = node.children.borrow().get(path[0]).cloned();
+            match existing {
+                Some(child) => {
+                    child.value.replace(Some(value));
+                }
+                None => {
+                    node.add_child(path[0].to_string(), Some(value));
+                }
+            }
             return Ok(());
         }
 
@@ -262,6 +272,15 @@ mod tests {
     }
 
     #[test]
+    fn set_config_on_existing_node_keeps_its_children() {
+        let config = ConfigManager::new("app".to_string());
+        config.set_config("a.b.c", ConfigValue::Integer(1)).unwrap();
+        config.set_config("a.b", ConfigValue::Integer(2)).unwrap();
+        assert_eq!(config.get_config("a.b"), Some(ConfigValue::Integer(2)));
+        assert_eq!(config.get_config("a.b.c"), Some(ConfigValue::Integer(1)));
+    }
+
+    #[test]
     fn child_node_knows_its_name_and_parent() {
         let root = ConfigNode::new_root("root".to_string());
         let child = root.add_child("child".to_string(), None);
@@ -296,10 +315,19 @@ mod tests {
             "private.key",
             "auth.credentials",
             "apikey",
+            "notifications.webhook.url",
         ] {
             assert!(is_sensitive(path), "{path}");
         }
-        for path in ["database.host", "api.auth.methods", "server.port", ""] {
+        for path in [
+            "database.host",
+            "api.auth.methods",
+            "server.port",
+            "security.token_expiry_hours",
+            "api.auth.api_key_header",
+            "features.password_reset",
+            "",
+        ] {
             assert!(!is_sensitive(path), "{path}");
         }
     }

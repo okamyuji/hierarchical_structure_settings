@@ -35,11 +35,17 @@ impl ConfigLoader {
         config_manager: &ConfigManager,
         prefix: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        use std::env;
+        Self::load_from_vars(config_manager, prefix, std::env::vars())
+    }
 
+    fn load_from_vars(
+        config_manager: &ConfigManager,
+        prefix: &str,
+        vars: impl IntoIterator<Item = (String, String)>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         // "APP" と "APP_" を同じ扱いにし、APPLE_* のような別名の変数を拾わない。
         let prefix = format!("{}_", prefix.trim_end_matches('_'));
-        for (key, value) in env::vars() {
+        for (key, value) in vars {
             if let Some(rest) = key.strip_prefix(&prefix) {
                 let config_path = rest
                     .trim_start_matches('_')
@@ -400,34 +406,42 @@ mod tests {
         assert!(ConfigLoader::load_multiple(&config, vec![bad, first]).is_err());
     }
 
+    fn vars(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
     #[test]
-    fn load_from_env_maps_prefixed_vars_to_paths() {
-        // SAFETY: このテストだけが HSSTEST 接頭辞の環境変数を読み書きする。
-        unsafe {
-            std::env::set_var("HSSTEST_DATABASE_HOST", "db.example.com");
-            std::env::set_var("HSSTEST_DATABASE_PORT", "5433");
-            std::env::set_var("HSSTESTX_LEAK", "1");
-        }
+    fn load_from_vars_maps_prefixed_vars_to_paths() {
+        let env = vars(&[
+            ("HSSTEST_DATABASE_HOST", "db.example.com"),
+            ("HSSTEST_DATABASE_PORT", "5433"),
+            ("HSSTESTX_LEAK", "1"),
+            ("OTHER_KEY", "x"),
+        ]);
         for prefix in ["HSSTEST", "HSSTEST_"] {
             let config = ConfigManager::new("t".to_string());
-            ConfigLoader::load_from_env(&config, prefix).unwrap();
+            ConfigLoader::load_from_vars(&config, prefix, env.clone()).unwrap();
+            assert_eq!(
+                config.get_config("database.host"),
+                Some(s("db.example.com"))
+            );
             assert_eq!(
                 config.get_config("database.port"),
                 Some(ConfigValue::Integer(5433))
             );
             assert_eq!(config.get_config("x.leak"), None, "{prefix}");
+            assert_eq!(config.get_config("key"), None, "{prefix}");
         }
+    }
+
+    #[test]
+    fn load_from_env_reads_process_environment() {
         let config = ConfigManager::new("t".to_string());
-        ConfigLoader::load_from_env(&config, "HSSTEST").unwrap();
-        assert_eq!(
-            config.get_config("database.host"),
-            Some(s("db.example.com"))
-        );
-        assert_eq!(
-            config.get_config("database.port"),
-            Some(ConfigValue::Integer(5433))
-        );
-        assert_eq!(config.get_config("hsstest"), None);
+        ConfigLoader::load_from_env(&config, "HSS_UNUSED_PREFIX_ZZ").unwrap();
+        assert_eq!(config.get_config("anything"), None);
     }
 
     #[test]
