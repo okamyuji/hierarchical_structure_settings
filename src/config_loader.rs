@@ -130,16 +130,16 @@ impl ConfigLoader {
         }
         
         // 値の範囲チェック
-        if let Some(ConfigValue::Integer(port)) = config_manager.get_config("server.port") {
-            if port < 1 || port > 65535 {
-                warnings.push("server.port must be between 1 and 65535".to_string());
-            }
+        if let Some(ConfigValue::Integer(port)) = config_manager.get_config("server.port")
+            && !(1..=65535).contains(&port)
+        {
+            warnings.push("server.port must be between 1 and 65535".to_string());
         }
-        
-        if let Some(ConfigValue::Integer(threads)) = config_manager.get_config("server.worker_threads") {
-            if threads < 1 || threads > 1000 {
-                warnings.push("server.worker_threads should be between 1 and 1000".to_string());
-            }
+
+        if let Some(ConfigValue::Integer(threads)) = config_manager.get_config("server.worker_threads")
+            && !(1..=1000).contains(&threads)
+        {
+            warnings.push("server.worker_threads should be between 1 and 1000".to_string());
         }
         
         Ok(warnings)
@@ -162,26 +162,10 @@ impl ConfigLoader {
                     Self::load_json_value(config_manager, val, path)?;
                 }
             }
-            Value::String(s) => {
-                config_manager.set_config(&prefix, ConfigValue::String(s.clone()))?;
-            }
-            Value::Number(n) => {
-                if let Some(i) = n.as_i64() {
-                    config_manager.set_config(&prefix, ConfigValue::Integer(i))?;
+            _ => {
+                if let Some(v) = Self::json_to_config_value(value) {
+                    config_manager.set_config(&prefix, v)?;
                 }
-            }
-            Value::Bool(b) => {
-                config_manager.set_config(&prefix, ConfigValue::Boolean(*b))?;
-            }
-            Value::Array(arr) => {
-                let config_array = arr
-                    .iter()
-                    .filter_map(|v| Self::json_to_config_value(v))
-                    .collect::<Vec<_>>();
-                config_manager.set_config(&prefix, ConfigValue::Array(config_array))?;
-            }
-            Value::Null => {
-                // Nullは設定しない
             }
         }
         Ok(())
@@ -203,24 +187,10 @@ impl ConfigLoader {
                     Self::load_toml_value(config_manager, val, path)?;
                 }
             }
-            toml::Value::String(s) => {
-                config_manager.set_config(&prefix, ConfigValue::String(s.clone()))?;
-            }
-            toml::Value::Integer(i) => {
-                config_manager.set_config(&prefix, ConfigValue::Integer(*i))?;
-            }
-            toml::Value::Boolean(b) => {
-                config_manager.set_config(&prefix, ConfigValue::Boolean(*b))?;
-            }
-            toml::Value::Array(arr) => {
-                let config_array = arr
-                    .iter()
-                    .filter_map(|v| Self::toml_to_config_value(v))
-                    .collect::<Vec<_>>();
-                config_manager.set_config(&prefix, ConfigValue::Array(config_array))?;
-            }
             _ => {
-                // 他の型は無視
+                if let Some(v) = Self::toml_to_config_value(value) {
+                    config_manager.set_config(&prefix, v)?;
+                }
             }
         }
         Ok(())
@@ -234,7 +204,7 @@ impl ConfigLoader {
             Value::Array(arr) => {
                 let config_array = arr
                     .iter()
-                    .filter_map(|v| Self::json_to_config_value(v))
+                    .filter_map(Self::json_to_config_value)
                     .collect::<Vec<_>>();
                 Some(ConfigValue::Array(config_array))
             }
@@ -250,7 +220,7 @@ impl ConfigLoader {
             toml::Value::Array(arr) => {
                 let config_array = arr
                     .iter()
-                    .filter_map(|v| Self::toml_to_config_value(v))
+                    .filter_map(Self::toml_to_config_value)
                     .collect::<Vec<_>>();
                 Some(ConfigValue::Array(config_array))
             }
@@ -295,5 +265,205 @@ mod tests {
         // 設定の検証
         let warnings = ConfigLoader::validate_config(&config).unwrap();
         assert!(warnings.is_empty());
+    }
+
+    fn fixture(name: &str) -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join(name)
+    }
+
+    fn write_temp(name: &str, content: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("hss_{}_{}", std::process::id(), name));
+        fs::write(&path, content).unwrap();
+        path
+    }
+
+    fn s(v: &str) -> ConfigValue {
+        ConfigValue::String(v.to_string())
+    }
+
+    #[test]
+    fn loads_nested_values_from_toml_file() {
+        let config = ConfigManager::new("t".to_string());
+        ConfigLoader::load_from_toml(&config, fixture("config.toml")).unwrap();
+        assert!(config.get_config("app.name").is_some());
+        assert!(matches!(config.get_config("database.port"), Some(ConfigValue::Integer(_))));
+    }
+
+    #[test]
+    fn loads_nested_values_from_json_file() {
+        let config = ConfigManager::new("t".to_string());
+        ConfigLoader::load_from_json(&config, fixture("config.json")).unwrap();
+        assert_eq!(config.get_config("database.pool.min_connections"), Some(ConfigValue::Integer(5)));
+        assert_eq!(config.get_config("database.ssl_enabled"), Some(ConfigValue::Boolean(true)));
+        assert_eq!(
+            config.get_config("database.replication.slave_hosts"),
+            Some(ConfigValue::Array(vec![
+                s("db-slave1.example.com"),
+                s("db-slave2.example.com"),
+                s("db-slave3.example.com"),
+            ]))
+        );
+    }
+
+    #[test]
+    fn json_skips_null_and_float_and_keeps_nested_arrays() {
+        let path = write_temp(
+            "types.json",
+            r#"{"a":{"n":null,"f":1.5,"arr":[1,"x",true,null,[2]]}}"#,
+        );
+        let config = ConfigManager::new("t".to_string());
+        ConfigLoader::load_from_json(&config, &path).unwrap();
+        assert_eq!(config.get_config("a.n"), None);
+        assert_eq!(config.get_config("a.f"), None);
+        assert_eq!(
+            config.get_config("a.arr"),
+            Some(ConfigValue::Array(vec![
+                ConfigValue::Integer(1),
+                s("x"),
+                ConfigValue::Boolean(true),
+                ConfigValue::Array(vec![ConfigValue::Integer(2)]),
+            ]))
+        );
+    }
+
+    #[test]
+    fn toml_skips_unsupported_types_and_keeps_nested_arrays() {
+        let path = write_temp(
+            "types.toml",
+            "[a]\nf = 1.5\nb = false\narr = [[1, 2], [\"x\", true], [1.5]]\n",
+        );
+        let config = ConfigManager::new("t".to_string());
+        ConfigLoader::load_from_toml(&config, &path).unwrap();
+        assert_eq!(config.get_config("a.f"), None);
+        assert_eq!(config.get_config("a.b"), Some(ConfigValue::Boolean(false)));
+        assert_eq!(
+            config.get_config("a.arr"),
+            Some(ConfigValue::Array(vec![
+                ConfigValue::Array(vec![ConfigValue::Integer(1), ConfigValue::Integer(2)]),
+                ConfigValue::Array(vec![s("x"), ConfigValue::Boolean(true)]),
+                ConfigValue::Array(vec![]),
+            ]))
+        );
+    }
+
+    #[test]
+    fn load_fails_on_missing_file_and_invalid_syntax() {
+        let config = ConfigManager::new("t".to_string());
+        assert!(ConfigLoader::load_from_json(&config, "no_such.json").is_err());
+        assert!(ConfigLoader::load_from_toml(&config, "no_such.toml").is_err());
+        assert!(ConfigLoader::load_from_json(&config, write_temp("bad.json", "{")).is_err());
+        assert!(ConfigLoader::load_from_toml(&config, write_temp("bad.toml", "a = ")).is_err());
+    }
+
+    #[test]
+    fn auto_load_dispatches_by_extension() {
+        let config = ConfigManager::new("t".to_string());
+        ConfigLoader::auto_load(&config, write_temp("x.json", r#"{"k":"json"}"#)).unwrap();
+        assert_eq!(config.get_config("k"), Some(s("json")));
+        ConfigLoader::auto_load(&config, write_temp("x.toml", "k = \"toml\"")).unwrap();
+        assert_eq!(config.get_config("k"), Some(s("toml")));
+        for name in ["c.yaml", "c.yml"] {
+            let err = ConfigLoader::auto_load(&config, name).unwrap_err();
+            assert_eq!(err.to_string(), "YAML support not implemented");
+        }
+        for name in ["c.ini", "noext"] {
+            let err = ConfigLoader::auto_load(&config, name).unwrap_err();
+            assert_eq!(err.to_string(), "Unsupported file format");
+        }
+    }
+
+    #[test]
+    fn load_multiple_later_file_wins_and_stops_on_error() {
+        let first = write_temp("m1.toml", "k = \"first\"\nonly_first = 1");
+        let second = write_temp("m2.json", r#"{"k":"second"}"#);
+        let config = ConfigManager::new("t".to_string());
+        ConfigLoader::load_multiple(&config, vec![first.clone(), second]).unwrap();
+        assert_eq!(config.get_config("k"), Some(s("second")));
+        assert_eq!(config.get_config("only_first"), Some(ConfigValue::Integer(1)));
+        let bad = Path::new("bad.ini").to_path_buf();
+        assert!(ConfigLoader::load_multiple(&config, vec![bad, first]).is_err());
+    }
+
+    #[test]
+    fn load_from_env_maps_prefixed_vars_to_paths() {
+        // SAFETY: このテストだけが HSSTEST 接頭辞の環境変数を読み書きする。
+        unsafe {
+            std::env::set_var("HSSTEST_DATABASE_HOST", "db.example.com");
+            std::env::set_var("HSSTEST_DATABASE_PORT", "5433");
+        }
+        let config = ConfigManager::new("t".to_string());
+        ConfigLoader::load_from_env(&config, "HSSTEST").unwrap();
+        assert_eq!(config.get_config("database.host"), Some(s("db.example.com")));
+        assert_eq!(config.get_config("database.port"), Some(ConfigValue::Integer(5433)));
+        assert_eq!(config.get_config("hsstest"), None);
+    }
+
+    #[test]
+    fn parse_env_value_prefers_integer_then_bool_then_string() {
+        assert_eq!(ConfigLoader::parse_env_value("-42"), ConfigValue::Integer(-42));
+        assert_eq!(ConfigLoader::parse_env_value("true"), ConfigValue::Boolean(true));
+        assert_eq!(ConfigLoader::parse_env_value("false"), ConfigValue::Boolean(false));
+        assert_eq!(ConfigLoader::parse_env_value("TRUE"), s("TRUE"));
+    }
+
+    #[test]
+    fn apply_defaults_sets_every_default() {
+        let config = ConfigManager::new("t".to_string());
+        ConfigLoader::apply_defaults(&config).unwrap();
+        let expected = [
+            ("app.name", s("DefaultApp")),
+            ("app.version", s("1.0.0")),
+            ("database.timeout_seconds", ConfigValue::Integer(30)),
+            ("database.ssl_enabled", ConfigValue::Boolean(false)),
+            ("server.host", s("127.0.0.1")),
+            ("server.port", ConfigValue::Integer(8080)),
+            ("server.worker_threads", ConfigValue::Integer(4)),
+            ("debug.enabled", ConfigValue::Boolean(false)),
+            ("debug.log_level", s("INFO")),
+            ("cache.enabled", ConfigValue::Boolean(true)),
+            ("cache.ttl_seconds", ConfigValue::Integer(3600)),
+        ];
+        for (path, value) in expected {
+            assert_eq!(config.get_config(path), Some(value), "{path}");
+        }
+    }
+
+    fn warnings_for(port: i64, threads: i64) -> Vec<String> {
+        let config = ConfigManager::new("t".to_string());
+        ConfigLoader::apply_defaults(&config).unwrap();
+        config.set_config("server.port", ConfigValue::Integer(port)).unwrap();
+        config
+            .set_config("server.worker_threads", ConfigValue::Integer(threads))
+            .unwrap();
+        ConfigLoader::validate_config(&config).unwrap()
+    }
+
+    #[test]
+    fn validate_config_checks_port_and_thread_boundaries() {
+        assert!(warnings_for(1, 1).is_empty());
+        assert!(warnings_for(65535, 1000).is_empty());
+        assert_eq!(
+            warnings_for(0, 0),
+            vec![
+                "server.port must be between 1 and 65535",
+                "server.worker_threads should be between 1 and 1000",
+            ]
+        );
+        assert_eq!(warnings_for(65536, 1001).len(), 2);
+    }
+
+    #[test]
+    fn validate_config_reports_missing_required_keys() {
+        let config = ConfigManager::new("t".to_string());
+        let warnings = ConfigLoader::validate_config(&config).unwrap();
+        assert_eq!(
+            warnings,
+            vec![
+                "Required configuration missing: database.host",
+                "Required configuration missing: database.port",
+                "Required configuration missing: server.host",
+                "Required configuration missing: server.port",
+            ]
+        );
     }
 }

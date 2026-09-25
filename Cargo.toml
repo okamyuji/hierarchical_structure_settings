@@ -1,7 +1,8 @@
 [package]
 name = "hierarchical_structure_settings"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
+rust-version = "1.88"
 authors = ["Your Name <your.email@example.com>"]
 description = "階層型設定管理システム - Hierarchical configuration management system"
 license = "MIT"
@@ -16,7 +17,7 @@ path = "src/lib.rs"
 
 [dependencies]
 serde_json = "1.0"
-toml = "0.8"
-uuid = { version = "1.10", features = ["v4"] }
+toml = "1.1"
+uuid = { version = "1.26", features = ["v4"] }
 
 [dev-dependencies]

@@ -16,7 +16,7 @@ pub enum ConfigValue {
 // 設定ノードの構造体
 pub struct ConfigNode {
     name: String,
-    value: Option<ConfigValue>,
+    value: RefCell<Option<ConfigValue>>,
     children: RefCell<HashMap<String, Rc<ConfigNode>>>,
     parent: RefCell<Weak<ConfigNode>>,
 }
@@ -26,7 +26,7 @@ impl ConfigNode {
     pub fn new_root(name: String) -> Rc<Self> {
         Rc::new(ConfigNode {
             name,
-            value: None,
+            value: RefCell::new(None),
             children: RefCell::new(HashMap::new()),
             parent: RefCell::new(Weak::new()),
         })
@@ -36,7 +36,7 @@ impl ConfigNode {
     pub fn add_child(self: &Rc<Self>, name: String, value: Option<ConfigValue>) -> Rc<ConfigNode> {
         let child = Rc::new(ConfigNode {
             name: name.clone(),
-            value,
+            value: RefCell::new(value),
             children: RefCell::new(HashMap::new()),
             parent: RefCell::new(Rc::downgrade(self)),
         });
@@ -53,7 +53,7 @@ impl ConfigNode {
 
     fn get_value_recursive(&self, path: &[&str]) -> Option<ConfigValue> {
         if path.is_empty() {
-            return self.value.clone();
+            return self.value.borrow().clone();
         }
 
         let children = self.children.borrow();
@@ -112,7 +112,7 @@ impl ConfigManager {
         } else {
             let new_child = Rc::new(ConfigNode {
                 name: path[0].to_string(),
-                value: None,
+                value: RefCell::new(None),
                 children: RefCell::new(HashMap::new()),
                 parent: RefCell::new(Rc::downgrade(node)),
             });
@@ -136,7 +136,7 @@ impl ConfigManager {
 
     fn display_node(&self, node: &ConfigNode, depth: usize) {
         let indent = "  ".repeat(depth);
-        match &node.value {
+        match &*node.value.borrow() {
             Some(value) => println!("{}{}= {:?}", indent, node.name(), value),
             None => println!("{}{}/", indent, node.name()),
         }
@@ -161,9 +161,8 @@ impl ConfigManager {
     ) -> Result<(), String> {
         if path.len() == 1 {
             let children = node.children.borrow();
-            if let Some(_child) = children.get(path[0]) {
-                // 既存ノードの値を更新（RefCellを使用）
-                // 注意：ConfigNodeの定義にvalue: RefCell<Option<ConfigValue>>が必要
+            if let Some(child) = children.get(path[0]) {
+                child.value.replace(Some(value));
                 return Ok(());
             } else {
                 return Err(format!("Path not found: {}", path[0]));
@@ -215,6 +214,58 @@ mod tests {
         assert_eq!(
             config.get_config("debug.enabled"),
             Some(ConfigValue::Boolean(true))
+        );
+    }
+
+    #[test]
+    fn get_config_returns_none_for_missing_or_intermediate_path() {
+        let config = ConfigManager::new("app".to_string());
+        config.set_config("a.b.c", ConfigValue::Integer(1)).unwrap();
+        assert_eq!(config.get_config("a.b.x"), None);
+        assert_eq!(config.get_config("a.b"), None);
+        assert_eq!(config.get_config("a.b.c"), Some(ConfigValue::Integer(1)));
+    }
+
+    #[test]
+    fn set_config_keeps_siblings_and_overwrites_leaf() {
+        let config = ConfigManager::new("app".to_string());
+        config.set_config("a.x", ConfigValue::Integer(1)).unwrap();
+        config.set_config("a.y", ConfigValue::Integer(2)).unwrap();
+        config.set_config("a.x", ConfigValue::Integer(3)).unwrap();
+        assert_eq!(config.get_config("a.x"), Some(ConfigValue::Integer(3)));
+        assert_eq!(config.get_config("a.y"), Some(ConfigValue::Integer(2)));
+    }
+
+    #[test]
+    fn child_node_knows_its_name_and_parent() {
+        let root = ConfigNode::new_root("root".to_string());
+        let child = root.add_child("child".to_string(), None);
+        assert_eq!(child.name(), "child");
+        assert_eq!(child.get_parent().unwrap().name(), "root");
+        assert!(root.get_parent().is_none());
+    }
+
+    #[test]
+    fn update_config_replaces_value_and_keeps_children() {
+        let config = ConfigManager::new("app".to_string());
+        config.set_config("a.b", ConfigValue::Integer(1)).unwrap();
+        config.set_config("a.b.c", ConfigValue::Integer(9)).unwrap();
+        config.update_config("a.b", ConfigValue::Integer(2)).unwrap();
+        assert_eq!(config.get_config("a.b"), Some(ConfigValue::Integer(2)));
+        assert_eq!(config.get_config("a.b.c"), Some(ConfigValue::Integer(9)));
+    }
+
+    #[test]
+    fn update_config_errors_on_missing_path() {
+        let config = ConfigManager::new("app".to_string());
+        config.set_config("a.b", ConfigValue::Integer(1)).unwrap();
+        assert_eq!(
+            config.update_config("a.x", ConfigValue::Integer(2)),
+            Err("Path not found: x".to_string())
+        );
+        assert_eq!(
+            config.update_config("z.b", ConfigValue::Integer(2)),
+            Err("Path not found: z.b".to_string())
         );
     }
 }

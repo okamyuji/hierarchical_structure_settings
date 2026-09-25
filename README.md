@@ -4,12 +4,12 @@ Rustで実装された柔軟で強力な階層型設定管理システムです�
 
 ## 特徴
 
-- **階層構造**: ドット記法（`database.host`）による直感的な設定アクセス
-- **複数の形式サポート**: JSON、TOML、環境変数から設定を読み込み
-- **型安全**: String、Integer、Boolean、Arrayの型をサポート
-- **設定検証**: 必須項目チェックと値範囲検証
-- **デフォルト値**: アプリケーションの初期設定を自動適用
-- **環境変数オーバーライド**: 設定ファイルの値を環境変数で上書き可能
+- 階層構造 `database.host` のようなドット記法で設定値にアクセスできます。
+- 複数の形式 JSON、TOML、環境変数から設定を読み込めます。
+- 型 扱える型はString、Integer、Boolean、Arrayの4種類です。
+- 設定検証 必須項目の有無と値の範囲を検査します。
+- デフォルト値 アプリケーションの初期設定をまとめて適用できます。
+- 環境変数による上書き 設定ファイルの値を環境変数で上書きできます。
 
 ## 使用方法
 
@@ -19,16 +19,16 @@ Rustで実装された柔軟で強力な階層型設定管理システムです�
 use hierarchical_structure_settings::{ConfigManager, ConfigValue};
 
 // 設定管理システムの初期化
-let config = ConfigManager::new(\"myapp\".to_string());
+let config = ConfigManager::new("myapp".to_string());
 
 // 設定値の設定
-config.set_config(\"database.host\", ConfigValue::String(\"localhost\".to_string()))?;
-config.set_config(\"database.port\", ConfigValue::Integer(5432))?;
-config.set_config(\"debug.enabled\", ConfigValue::Boolean(true))?;
+config.set_config("database.host", ConfigValue::String("localhost".to_string()))?;
+config.set_config("database.port", ConfigValue::Integer(5432))?;
+config.set_config("debug.enabled", ConfigValue::Boolean(true))?;
 
 // 設定値の取得
-let host = config.get_config(\"database.host\");
-let port = config.get_config(\"database.port\");
+let host = config.get_config("database.host");
+let port = config.get_config("database.port");
 
 // 設定ツリーの表示
 config.display_tree();
@@ -37,24 +37,25 @@ config.display_tree();
 ### 設定ファイルからの読み込み
 
 ```rust
-use hierarchical_structure_settings::{ConfigManager, ConfigLoader};
+use hierarchical_structure_settings::ConfigManager;
+use hierarchical_structure_settings::config_loader::ConfigLoader;
 
-let config = ConfigManager::new(\"myapp\".to_string());
+let config = ConfigManager::new("myapp".to_string());
 
 // デフォルト設定を適用
 ConfigLoader::apply_defaults(&config)?;
 
 // TOMLファイルから読み込み
-ConfigLoader::load_from_toml(&config, \"config.toml\")?;
+ConfigLoader::load_from_toml(&config, "config.toml")?;
 
 // 環境変数から読み込み（MYAPP_プレフィックス）
-ConfigLoader::load_from_env(&config, \"MYAPP\")?;
+ConfigLoader::load_from_env(&config, "MYAPP_")?;
 
 // 設定の検証
 let warnings = ConfigLoader::validate_config(&config)?;
 if !warnings.is_empty() {
     for warning in warnings {
-        eprintln!(\"Warning: {}\", warning);
+        eprintln!("Warning: {}", warning);
     }
 }
 ```
@@ -64,9 +65,9 @@ if !warnings.is_empty() {
 ```rust
 // 複数ファイルを順次読み込み（後勝ち）
 let config_files = vec![
-    \"defaults.toml\",
-    \"config.toml\", 
-    \"local.toml\"
+    "defaults.toml",
+    "config.toml", 
+    "local.toml"
 ];
 
 ConfigLoader::load_multiple(&config, config_files)?;
@@ -78,13 +79,13 @@ ConfigLoader::load_multiple(&config, config_files)?;
 
 ```toml
 [app]
-name = \"MyApplication\"
-version = \"1.0.0\"
+name = "MyApplication"
+version = "1.0.0"
 
 [database]
-host = \"localhost\"
+host = "localhost"
 port = 5432
-username = \"admin\"
+username = "admin"
 ssl_enabled = true
 
 [database.pool]
@@ -93,23 +94,23 @@ max_connections = 50
 
 [debug]
 enabled = false
-log_level = \"INFO\"
+log_level = "INFO"
 ```
 
 ### config.json
 
 ```json
 {
-  \"app\": {
-    \"name\": \"MyApplication\",
-    \"version\": \"1.0.0\"
+  "app": {
+    "name": "MyApplication",
+    "version": "1.0.0"
   },
-  \"database\": {
-    \"host\": \"localhost\",
-    \"port\": 5432,
-    \"pool\": {
-      \"min_connections\": 5,
-      \"max_connections\": 50
+  "database": {
+    "host": "localhost",
+    "port": 5432,
+    "pool": {
+      "min_connections": 5,
+      "max_connections": 50
     }
   }
 }
@@ -117,14 +118,14 @@ log_level = \"INFO\"
 
 ## 環境変数による上書き
 
-環境変数を使用して設定ファイルの値を上書きできます：
+次の環境変数を設定すると、設定ファイルの値を上書きできます。
 
 ```bash
 # MYAPP_DATABASE_HOST=production.db.example.com
 # MYAPP_DATABASE_PORT=5433
 # MYAPP_DEBUG_ENABLED=true
 
-export MYAPP_DATABASE_HOST=\"production.db.example.com\"
+export MYAPP_DATABASE_HOST="production.db.example.com"
 export MYAPP_DATABASE_PORT=5433
 export MYAPP_DEBUG_ENABLED=true
 ```
@@ -190,9 +191,12 @@ export MYAPP_DEBUG_ENABLED=true
 
 ```toml
 [dependencies]
-serde_json = \"1.0\"
-toml = \"0.8\"
+serde_json = "1.0"
+toml = "1.1"
+uuid = { version = "1.26", features = ["v4"] }
 ```
+
+このクレートはRust edition 2024でビルドします。
 
 ## テスト
 
@@ -206,4 +210,4 @@ MIT License
 
 ## 貢献
 
-プルリクエストや Issue の投稿を歓迎します。
+不具合の報告はIssueで、改善の提案はプルリクエストで受け付けます。

@@ -59,7 +59,7 @@ fn load_config_files(config: &ConfigManager) -> Result<(), Box<dyn std::error::E
     
     // 環境変数からの読み込み
     println!("  環境変数から設定を読み込んでいます (APP_プレフィックス)...");
-    match ConfigLoader::load_from_env(config, "APP") {
+    match ConfigLoader::load_from_env(config, "APP_") {
         Ok(_) => println!("  ✓ 環境変数の読み込み完了"),
         Err(e) => println!("  ⚠ 環境変数読み込みエラー: {}", e),
     }
@@ -120,10 +120,10 @@ fn demonstrate_config_usage(config: &ConfigManager) {
     if let Some(ConfigValue::Boolean(debug_enabled)) = config.get_config("debug.enabled") {
         println!("\nデバッグモード: {}", if debug_enabled { "有効" } else { "無効" });
         
-        if debug_enabled {
-            if let Some(ConfigValue::String(log_level)) = config.get_config("debug.log_level") {
-                println!("  ログレベル: {}", log_level);
-            }
+        if debug_enabled
+            && let Some(ConfigValue::String(log_level)) = config.get_config("debug.log_level")
+        {
+            println!("  ログレベル: {}", log_level);
         }
     }
 
@@ -158,10 +158,8 @@ fn demonstrate_config_updates(config: &ConfigManager) -> Result<(), String> {
         println!("現在のデバッグ設定: {:?}", current_debug);
     }
 
-    // NOTE: 現在の実装では更新機能が完全ではないため、
-    // 新しい値を設定する形でデモを行います
-    config.set_config("debug.enabled", ConfigValue::Boolean(false))?;
-    config.set_config("debug.log_level", ConfigValue::String("INFO".to_string()))?;
+    config.update_config("debug.enabled", ConfigValue::Boolean(false))?;
+    config.update_config("debug.log_level", ConfigValue::String("INFO".to_string()))?;
     
     println!("デバッグ設定を更新しました");
     
